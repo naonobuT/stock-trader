@@ -17,20 +17,19 @@ router.post('/start', requireAuth, (req, res) => {
 
   if (!range || !range.first) return res.status(404).json({ error: 'データがありません' });
 
-  // ゲーム開始日をランダムに選択（最後からgame_days分以上前の範囲）
-  const allDates = db.prepare(
-    'SELECT date FROM price_cache WHERE symbol = ? ORDER BY date ASC'
-  ).all(symbol).map(r => r.date);
+  // ゲーム開始日をランダムに選択（最低100日分の残データを確保）
+  const minRemaining = 100;
+  const totalCount = db.prepare('SELECT COUNT(*) as n FROM price_cache WHERE symbol = ?').get(symbol).n;
 
-  if (allDates.length < 10) {
+  if (totalCount < 10) {
     return res.status(400).json({ error: 'データが不足しています' });
   }
 
-  // ランダムな開始位置（最低100日分の残データを確保）
-  const minRemaining = 100;
-  const maxStartIdx = Math.max(0, allDates.length - minRemaining - 1);
+  const maxStartIdx = Math.max(0, totalCount - minRemaining - 1);
   const startIdx = Math.floor(Math.random() * (maxStartIdx + 1));
-  const startDate = allDates[startIdx];
+  const startDate = db.prepare(
+    'SELECT date FROM price_cache WHERE symbol = ? ORDER BY date ASC LIMIT 1 OFFSET ?'
+  ).get(symbol, startIdx).date;
 
   // 既存セッションをリセット
   db.prepare('DELETE FROM game_sessions WHERE user_id = ?').run(userId);
@@ -79,10 +78,9 @@ router.get('/state', requireAuth, (req, res) => {
   });
 
   // 経過日数（取引日ベース）
-  const allDates = db.prepare(
-    'SELECT date FROM price_cache WHERE symbol = ? AND date >= ? AND date <= ? ORDER BY date ASC'
-  ).all(session.symbol, session.start_date, session.current_date);
-  const elapsed = allDates.length - 1;
+  const elapsed = db.prepare(
+    'SELECT COUNT(*) as n FROM price_cache WHERE symbol = ? AND date >= ? AND date <= ?'
+  ).get(session.symbol, session.start_date, session.current_date).n - 1;
 
   // 総資産（ロングのみ）
   const totalAssets = user.virtual_cash + positionValue;
@@ -181,10 +179,9 @@ router.post('/next', requireAuth, (req, res) => {
   })();
 
   // 経過日数チェック
-  const allDates = db.prepare(
-    'SELECT date FROM price_cache WHERE symbol = ? AND date >= ? AND date <= ? ORDER BY date ASC'
-  ).all(session.symbol, session.start_date, nextDate);
-  const elapsed = allDates.length - 1;
+  const elapsed = db.prepare(
+    'SELECT COUNT(*) as n FROM price_cache WHERE symbol = ? AND date >= ? AND date <= ?'
+  ).get(session.symbol, session.start_date, nextDate).n - 1;
 
   db.prepare('UPDATE game_sessions SET current_date = ? WHERE user_id = ?').run(nextDate, userId);
 
