@@ -91,6 +91,20 @@ function saveKeyboardShortcuts() {
   localStorage.setItem('keyboardShortcuts', JSON.stringify(keyboardShortcuts));
 }
 
+let defaultBars = 120;
+
+function loadDefaultBars() {
+  const saved = localStorage.getItem('defaultBars');
+  if (saved) defaultBars = Math.max(10, Math.min(1000, parseInt(saved)));
+  const el = document.getElementById('defaultBarsInput');
+  if (el) el.value = defaultBars;
+}
+
+function saveDefaultBars(val) {
+  defaultBars = Math.max(10, Math.min(1000, parseInt(val)));
+  localStorage.setItem('defaultBars', defaultBars);
+}
+
 function eventToKeyString(e) {
   const parts = [];
   if (e.ctrlKey) parts.push('Ctrl');
@@ -198,6 +212,7 @@ async function init() {
   loadChartColors();
   loadIndicatorSettings();
   loadKeyboardShortcuts();
+  loadDefaultBars();
   setupEvents();
 
   try { setupChart(); } catch (e) { console.error('Chart init failed:', e); }
@@ -1082,11 +1097,7 @@ async function refreshChart() {
   if (userZoomSet) {
     viewBars = Math.min(parseInt(slider.max), parseInt(slider.value));
   } else {
-    // 最初の1銘柄目のみゲーム開始点の少し前から現在までを表示
-    const historyFromIdx = Math.max(0, guest.start_idx - 200);
-    const startInChart = guest.start_idx - historyFromIdx;
-    const focusBars = currentCandles.length - Math.max(0, startInChart - 30);
-    viewBars = Math.min(parseInt(slider.max), Math.max(60, focusBars));
+    viewBars = Math.min(parseInt(slider.max), defaultBars);
     userZoomSet = true;
   }
   slider.value = viewBars;
@@ -1744,6 +1755,10 @@ function setupEvents() {
       saveChartColors();
       applyChartColors();
     });
+  });
+
+  document.getElementById('defaultBarsInput').addEventListener('change', (e) => {
+    saveDefaultBars(e.target.value);
   });
 
   document.getElementById('resetColorsBtn').addEventListener('click', () => {
