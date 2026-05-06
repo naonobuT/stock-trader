@@ -1740,7 +1740,10 @@ function setupEvents() {
 
   function applyBlindChartOptions() {
     const opts = { crosshair: { vertLine: { labelVisible: !blindMode } } };
-    [lwChart, volChart, rsiChartInst, macdChartInst].forEach(c => { if (c) c.applyOptions(opts); });
+    const tsOpts = { timeScale: { visible: !blindMode } };
+    [lwChart, volChart, rsiChartInst, macdChartInst].forEach(c => {
+      if (c) { c.applyOptions(opts); c.applyOptions(tsOpts); }
+    });
   }
 
   const colorInputIds  = ['colorUpCandle', 'colorDownCandle', 'colorMa1', 'colorMa2', 'colorMa3', 'colorVolUp', 'colorVolDown', 'colorBBBand', 'colorBBMid', 'colorBBBand3', 'colorRSILine', 'colorMACDLine', 'colorSignalLine'];
