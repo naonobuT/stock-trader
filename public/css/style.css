@@ -896,7 +896,7 @@ header {
   color: var(--text2);
 }
 
-#tabData {
+.settings-inner:has(#tabData:not(.hidden)) {
   max-width: unset;
 }
 
