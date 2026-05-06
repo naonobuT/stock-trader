@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>株式投資ゲーム</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body class="dark">
+  <header>
+    <div class="header-left">
+      <span class="logo">📈 株式投資ゲーム</span>
+    </div>
+    <div class="header-stats" id="headerStats">
+      <div class="stat-item"><span class="stat-label">資産</span><span id="statAssets" class="stat-value">-</span></div>
+      <div class="stat-item"><span class="stat-label">利益率</span><span id="statProfit" class="stat-value">-</span></div>
+      <div class="stat-item"><span class="stat-label">経過日数</span><span id="statElapsed" class="stat-value">-</span></div>
+      <div class="stat-item"><span class="stat-label">余力</span><span id="statCash" class="stat-value">-</span></div>
+    </div>
+    <div class="header-right">
+      <div class="search-wrap">
+        <input type="text" id="symbolSearch" class="search-input" placeholder="コード・社名で検索">
+        <div id="searchDropdown" class="search-dropdown hidden"></div>
+      </div>
+      <button id="newGameBtn" class="btn-outline-sm">🎲 銘柄変更[N]</button>
+      <div class="auto-advance-controls">
+        <input type="number" id="autoIntervalInput" value="3" min="0.5" step="0.5" class="auto-interval-input">
+        <span class="auto-interval-label">秒</span>
+        <button id="autoAdvanceBtn" class="btn-auto" disabled>自動更新</button>
+      </div>
+      <button id="nextDayBtn" class="btn-next" disabled>[SPACE] 翌日へ</button>
+      <button id="blindModeBtn" class="btn-outline-sm">🙈 ブラインド</button>
+    </div>
+  </header>
+
+  <!-- ゲーム開始モーダル -->
+  <div id="startModal" class="modal-overlay">
+    <div class="modal-box">
+      <h2>株式投資ゲーム</h2>
+      <p>ランダムな銘柄・時代からトレードを練習しよう</p>
+      <div id="startMsg" class="msg"></div>
+      <button id="startGameBtn" class="btn-primary" style="margin-top:8px">ゲーム開始</button>
+    </div>
+  </div>
+
+  <main class="trade-layout">
+    <section class="chart-section">
+      <div class="view-tabs">
+        <button class="view-tab active" data-view="candle">チャート</button>
+        <button class="view-tab" data-view="pnl">損益グラフ</button>
+        <button class="view-tab" id="compViewTab" data-view="comparison" style="display:none">売買方法比較</button>
+        <button class="view-tab" data-view="settings">設定</button>
+      </div>
+
+      <div id="candleView" class="view-panel">
+        <div class="symbol-bar">
+          <h2 id="currentSymbol">-</h2>
+          <span id="currentDate" class="date-label"></span>
+          <div class="ma-controls">
+            <label><span id="ma1Label">MA1</span>: <input type="number" id="ma1Days" value="25" min="1" max="200" class="ma-input">日</label>
+            <label><span id="ma2Label">MA2</span>: <input type="number" id="ma2Days" value="75" min="1" max="200" class="ma-input">日</label>
+            <label><span id="ma3Label">MA3</span>: <input type="number" id="ma3Days" value="200" min="1" max="200" class="ma-input">日</label>
+          </div>
+          <span id="currentPrice" class="price-display">-</span>
+        </div>
+        <div id="chartsWrapper">
+          <div id="candleChart"></div>
+          <div id="chartResizer"></div>
+          <div id="volumeChart"></div>
+          <div id="rsiChart"  style="height:100px; display:none;"></div>
+          <div id="macdChart" style="height:100px; display:none;"></div>
+        </div>
+        <div class="range-bar">
+          <span class="range-label" id="rangeLabel">-</span>
+          <input type="range" id="rangeSlider" min="10" max="500" value="200" step="1">
+          <span class="range-hint">← 広げる / 縮める →</span>
+        </div>
+      </div>
+
+      <div id="pnlView" class="view-panel" style="display:none">
+        <canvas id="pnlChartLarge"></canvas>
+      </div>
+
+      <div id="comparisonView" class="view-panel" style="display:none">
+        <canvas id="comparisonChartLarge"></canvas>
+      </div>
+
+      <div id="settingsView" class="view-panel settings-view" style="display:none">
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-tab="chart">チャート設定</button>
+          <button class="settings-tab" data-tab="keys">キー設定</button>
+          <button class="settings-tab" data-tab="data">データ管理</button>
+          <button class="settings-tab" data-tab="help">使い方</button>
+        </div>
+        <div class="settings-inner">
+          <!-- チャート設定 -->
+          <div class="settings-tab-content" id="tabChart">
+            <div class="settings-section">
+              <div class="settings-section-title">ローソク足</div>
+              <div class="settings-row"><label>陽線</label><input type="color" id="colorUpCandle"></div>
+              <div class="settings-row"><label>陰線</label><input type="color" id="colorDownCandle"></div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">移動平均線</div>
+              <div class="settings-row"><label>MA1</label><input type="color" id="colorMa1"></div>
+              <div class="settings-row"><label>MA2</label><input type="color" id="colorMa2"></div>
+              <div class="settings-row"><label>MA3</label><input type="color" id="colorMa3"></div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">出来高</div>
+              <div class="settings-row"><label>陽線</label><input type="color" id="colorVolUp"></div>
+              <div class="settings-row"><label>陰線</label><input type="color" id="colorVolDown"></div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">インジケーター</div>
+              <div class="settings-row">
+                <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;"><input type="checkbox" id="showBB"> ボリンジャーバンド（2σ）</label>
+                <input type="color" id="colorBBBand" title="2σバンド色">
+                <input type="color" id="colorBBMid" title="中心線色">
+              </div>
+              <div class="settings-row" style="padding-left:18px;">
+                <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;"><input type="checkbox" id="showBB3"> 3σも表示</label>
+                <input type="color" id="colorBBBand3" title="3σバンド色">
+              </div>
+              <div class="settings-row">
+                <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;"><input type="checkbox" id="showRSI"> RSI</label>
+                <input type="color" id="colorRSILine" title="RSI線色">
+              </div>
+              <div class="settings-row">
+                <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;"><input type="checkbox" id="showMACD"> MACD</label>
+                <input type="color" id="colorMACDLine" title="MACD線色">
+                <input type="color" id="colorSignalLine" title="シグナル線色">
+              </div>
+            </div>
+            <button id="resetColorsBtn" class="btn-outline" style="margin-top:14px">デフォルトに戻す</button>
+            <p style="margin-top:16px;font-size:10px;color:var(--text2)">Charts powered by <a href="https://www.tradingview.com/" target="_blank" rel="noopener" style="color:var(--text2)">TradingView</a></p>
+          </div>
+
+          <!-- データ管理 -->
+          <div class="settings-tab-content hidden" id="tabData">
+            <div class="data-stats">
+              <div class="data-stat-item"><span class="data-stat-num" id="statSymbols">-</span><span class="data-stat-lbl">銘柄数</span></div>
+              <div class="data-stat-item"><span class="data-stat-num" id="statRows">-</span><span class="data-stat-lbl">総データ行数</span></div>
+            </div>
+            <div class="settings-section-title" style="margin-top:14px">銘柄リスト更新（JPX）</div>
+            <p class="data-hint"><a href="https://www.jpx.co.jp/markets/statistics-equities/misc/01.html" target="_blank" rel="noopener">JPX（上場銘柄一覧）</a>からXLS/XLSXをダウンロードし、ここで取り込むと銘柄リストが最新化される。新規上場・名称変更・上場廃止が自動反映される。</p>
+            <input type="file" id="symbolsXlsPicker" accept=".xls,.xlsx" style="display:none">
+            <div class="import-row">
+              <button id="symbolsXlsSelectBtn" class="btn-folder-select">📄 XLSファイルを選択</button>
+              <span id="symbolsXlsName" class="selected-folder-name">未選択</span>
+              <button id="symbolsXlsImportBtn" class="btn-small" disabled>更新開始</button>
+            </div>
+            <div class="import-result hidden" id="symbolsXlsResult"></div>
+            <div class="settings-section-title" style="margin-top:14px">CSVデータ取込</div>
+            <p class="data-hint">株価CSVが入ったフォルダを選択してください。<br>ファイル名が銘柄コードとして取り込まれます。</p>
+            <div class="format-row"><label class="format-label">データ形式</label><select id="formatSelect" class="format-select"></select></div>
+            <input type="file" id="folderPicker" webkitdirectory multiple accept=".csv" style="display:none">
+            <div class="import-row">
+              <button id="folderSelectBtn" class="btn-folder-select">📁 フォルダを選択</button>
+              <span id="selectedFolderName" class="selected-folder-name">未選択</span>
+              <button id="importBtn" class="btn-small" disabled>取込開始</button>
+            </div>
+            <div class="progress-wrap hidden" id="progressWrap">
+              <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressBar"></div></div>
+              <div class="progress-text" id="progressText">準備中...</div>
+            </div>
+            <div class="import-result hidden" id="importResult"></div>
+            <div class="settings-section-title" style="margin-top:16px">Yahoo Financeダウンロード</div>
+            <div class="yahoo-auto-row">
+              <div class="yahoo-auto-btn-group">
+                <button id="yahooUpdateBtn" class="btn-yahoo-auto">既存銘柄を最新化</button>
+                <span class="yahoo-auto-desc">DBにある全銘柄の最終日〜今日を補完</span>
+              </div>
+              <div class="yahoo-auto-btn-group">
+                <button id="yahooFillBtn" class="btn-yahoo-auto">未取込銘柄を一括取得</button>
+                <span class="yahoo-auto-desc">DBにない銘柄を取得可能な最古から補完</span>
+              </div>
+              <button id="yahooStopBtn" class="btn-yahoo-stop hidden">■ 中断</button>
+            </div>
+            <div class="progress-wrap hidden" id="yahooAutoProgressWrap">
+              <div class="progress-bar-bg"><div class="progress-bar-fill" id="yahooAutoProgressBar"></div></div>
+              <div class="progress-text" id="yahooAutoProgressText"></div>
+            </div>
+            <div class="import-result hidden" id="yahooAutoResult"></div>
+            <div class="settings-section-title" style="margin-top:12px">個別銘柄を指定して取得</div>
+            <p class="data-hint">銘柄コードをカンマ・改行で区切って入力。</p>
+            <textarea id="yahooSymbols" class="yahoo-symbols-input" placeholder="例: 7203&#10;9984&#10;6758"></textarea>
+            <div class="yahoo-period-row">
+              <label class="format-label">取得開始日</label>
+              <input type="date" id="yahooPeriod1" class="yahoo-date-input">
+              <label class="format-label">〜</label>
+              <input type="date" id="yahooPeriod2" class="yahoo-date-input">
+              <button id="yahooDownloadBtn" class="btn-small">取得開始</button>
+            </div>
+            <div class="progress-wrap hidden" id="yahooProgressWrap">
+              <div class="progress-bar-bg"><div class="progress-bar-fill" id="yahooProgressBar"></div></div>
+              <div class="progress-text" id="yahooProgressText">準備中...</div>
+            </div>
+            <div class="import-result hidden" id="yahooResult"></div>
+            <div class="settings-section-title" style="margin-top:16px">
+              取込済み銘柄
+              <input type="text" id="symbolFilter" class="symbol-filter-input" placeholder="絞込">
+            </div>
+            <div class="symbol-table-wrap">
+              <table class="symbol-table">
+                <thead><tr><th>コード</th><th>銘柄名</th><th>件数</th><th>期間</th><th></th></tr></thead>
+                <tbody id="symbolTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 使い方 -->
+          <div class="settings-tab-content hidden" id="tabHelp">
+            <div class="help-content">
+              <div class="help-section">
+                <div class="help-section-title">基本の流れ</div>
+                <ol class="help-list">
+                  <li>「銘柄変更」でランダムな銘柄・時代が選択される</li>
+                  <li>チャートを分析して注文モードと株数を設定</li>
+                  <li>「買い」または「空売り」で注文 → 翌日の始値で約定</li>
+                  <li>「翌日へ」または自動更新でチャートを進める</li>
+                  <li>保有ポジションを決済して利益を積み上げる</li>
+                </ol>
+              </div>
+              <div class="help-section">
+                <div class="help-section-title">注文モード</div>
+                <dl class="help-dl">
+                  <dt>株数</dt><dd>指定した株数をそのまま発注する</dd>
+                  <dt>所持金の%</dt><dd>手持ち資金の指定割合分を発注する</dd>
+                  <dt>リスク管理</dt><dd>許容損失（総資産×R%）と損切り幅（S%）から株数を自動計算する</dd>
+                </dl>
+              </div>
+              <div class="help-section">
+                <div class="help-section-title">リスク管理の使い方</div>
+                <p class="help-p">「1回のトレードで総資産の何%まで損してよいか」を基準に株数を決める。株数 ＝ 総資産 × R% ÷ （価格 × S%）</p>
+              </div>
+              <div class="help-section">
+                <div class="help-section-title">損切り自動執行</div>
+                <p class="help-p">リスク管理モードで注文すると損切り価格が固定される。「損切り自動執行」をONにすると自動決済される。</p>
+              </div>
+              <div class="help-section">
+                <div class="help-section-title">キーボードショートカット</div>
+                <dl class="help-dl">
+                  <dt>Space</dt><dd>翌日へ進む</dd>
+                  <dt>N</dt><dd>銘柄を変更する</dd>
+                </dl>
+              </div>
+              <div class="help-section">
+                <div class="help-section-title">グラフ</div>
+                <p class="help-p">「売買方法比較」グラフは、リスク管理モードで最初に注文した時点から、同じタイミングで「所持金50%」「固定100株」で取引した場合と損益を比較する。</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- キー設定 -->
+          <div class="settings-tab-content hidden" id="tabKeys">
+            <div class="shortcut-list">
+              <div class="shortcut-row">
+                <span class="shortcut-label">買い注文</span>
+                <span class="shortcut-key-display" id="keyDisplay-buy"></span>
+                <button class="shortcut-record-btn" data-action="buy">変更</button>
+                <button class="shortcut-clear-btn" data-action="buy">削除</button>
+              </div>
+              <div class="shortcut-row">
+                <span class="shortcut-label">空売り注文</span>
+                <span class="shortcut-key-display" id="keyDisplay-short"></span>
+                <button class="shortcut-record-btn" data-action="short">変更</button>
+                <button class="shortcut-clear-btn" data-action="short">削除</button>
+              </div>
+              <div class="shortcut-row">
+                <span class="shortcut-label">全売却 / 全買い戻し</span>
+                <span class="shortcut-key-display" id="keyDisplay-close"></span>
+                <button class="shortcut-record-btn" data-action="close">変更</button>
+                <button class="shortcut-clear-btn" data-action="close">削除</button>
+              </div>
+            </div>
+            <p class="help-p shortcut-hint">「変更」を押した後にキーを1つ押してください。Escapeでキャンセル。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <!-- 注文パネル -->
+      <div class="card order-card">
+        <h3>注文</h3>
+        <div class="order-type-tabs">
+          <button class="order-tab order-tab-buy" data-type="buy">買い</button>
+          <button class="order-tab order-tab-short" data-type="short">空売り</button>
+        </div>
+        <div class="order-mode-toggle">
+          <button class="mode-btn" data-mode="shares">株数</button>
+          <button class="mode-btn" data-mode="percent">所持金の%</button>
+          <button class="mode-btn active" data-mode="risk">リスク管理</button>
+        </div>
+        <div id="sharesModeInput" class="hidden">
+          <label>株数</label>
+          <input type="number" id="sharesInput" min="1" value="100" placeholder="株数">
+        </div>
+        <div id="percentModeInput" class="hidden">
+          <label>所持金の割合</label>
+          <div class="percent-input-row">
+            <input type="number" id="percentInput" min="1" max="100" value="50" placeholder="%" step="1">
+            <span class="percent-unit">%</span>
+          </div>
+          <div class="percent-presets">
+            <button class="preset-btn" data-pct="10">10%</button>
+            <button class="preset-btn" data-pct="25">25%</button>
+            <button class="preset-btn" data-pct="50">50%</button>
+            <button class="preset-btn" data-pct="100">全力</button>
+          </div>
+        </div>
+        <div id="riskModeInput">
+          <div class="risk-row">
+            <label>リスク率 R（総資産の%）</label>
+            <div class="percent-input-row">
+              <input type="number" id="riskRateInput" min="0.1" max="10" value="1" step="0.1">
+              <span class="percent-unit">%</span>
+            </div>
+            <div class="percent-presets">
+              <button class="preset-btn" data-risk-r="0.5">0.5%</button>
+              <button class="preset-btn" data-risk-r="1">1%</button>
+              <button class="preset-btn" data-risk-r="2">2%</button>
+            </div>
+          </div>
+          <div class="risk-row">
+            <label>損切り幅 S（エントリーから%）</label>
+            <div class="percent-input-row">
+              <input type="number" id="riskStopInput" min="0.1" max="50" value="5" step="0.1">
+              <span class="percent-unit">%</span>
+            </div>
+            <div class="percent-presets">
+              <button class="preset-btn" data-risk-s="3">3%</button>
+              <button class="preset-btn" data-risk-s="5">5%</button>
+              <button class="preset-btn" data-risk-s="10">10%</button>
+            </div>
+          </div>
+          <div class="risk-row auto-stop-row">
+            <span class="auto-stop-label">損切り自動執行</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="autoStopEnabled">
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+          <div class="risk-row" id="slippageRow" style="display:none">
+            <label>スリッページ</label>
+            <div class="percent-input-row">
+              <input type="number" id="slippageInput" min="0" max="5" value="0.1" step="0.05">
+              <span class="percent-unit">%</span>
+            </div>
+          </div>
+        </div>
+        <div class="order-preview" id="orderPreview"></div>
+        <button id="executeBtn" class="btn-primary btn-sell" style="display:none"></button>
+        <div id="orderMsg" class="msg"></div>
+        <div id="pendingOrders"></div>
+      </div>
+
+      <!-- ポートフォリオ -->
+      <div class="card portfolio-card">
+        <h3>ポートフォリオ</h3>
+        <div id="positionList"><p class="empty">保有なし</p></div>
+      </div>
+
+      <!-- 実現損益グラフ -->
+      <div class="card pnl-card">
+        <h3>実現損益</h3>
+        <canvas id="pnlChart" height="120"></canvas>
+      </div>
+
+      <!-- 売買方法比較グラフ -->
+      <div class="card pnl-card" id="comparisonCard" style="display:none;">
+        <h3>売買方法比較（実現損益）</h3>
+        <canvas id="comparisonChart" height="150"></canvas>
+      </div>
+    </aside>
+  </main>
+
+  <div id="forceCloseToast" class="force-close-toast hidden"></div>
+  <script src="/js/trade.js"></script>
+</body>
+</html>

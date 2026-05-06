@@ -1,0 +1,68 @@
+{
+  "name": "stock-trader",
+  "version": "1.0.0",
+  "description": "株式投資ゲーム",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "electron": "electron .",
+    "rebuild": "electron-rebuild",
+    "build": "electron-builder --win"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.9.0",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "iconv-lite": "^0.6.3",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.2",
+    "yahoo-finance2": "^3.14.0"
+  },
+  "devDependencies": {
+    "electron": "^29.4.6",
+    "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9",
+    "nodemon": "^3.0.3",
+    "xlsx": "^0.18.5"
+  },
+  "build": {
+    "appId": "com.stocktrader.app",
+    "productName": "株式投資ゲーム",
+    "copyright": "Copyright © 2025",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "ja-JP"
+      ],
+      "language": "1041"
+    },
+    "files": [
+      "electron/**/*",
+      "server.js",
+      "src/**/*",
+      "public/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache/**/*",
+      "!node_modules/.bin/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "stockdata",
+        "to": "stockdata"
+      }
+    ]
+  }
+}

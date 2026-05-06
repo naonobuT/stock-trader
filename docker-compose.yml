@@ -1,0 +1,30 @@
+services:
+  stock-trader:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # DB を永続化（コンテナ再起動でもデータが残る）
+      - stock_db:/data
+    environment:
+      - SESSION_SECRET=change-this-secret-in-production
+      # 本番で全銘柄を外部ボリュームから使う場合は以下をコメント解除:
+      # - STOCK_DATA_DIR=/mnt/stockdata
+    restart: unless-stopped
+
+# ===== VPS 本番用（全銘柄をマウント）=====
+# services:
+#   stock-trader:
+#     build: .
+#     ports:
+#       - "3000:3000"
+#     volumes:
+#       - stock_db:/data
+#       - /path/to/stockdata:/mnt/stockdata:ro
+#     environment:
+#       - SESSION_SECRET=change-this-secret-in-production
+#       - STOCK_DATA_DIR=/mnt/stockdata
+#     restart: unless-stopped
+
+volumes:
+  stock_db:

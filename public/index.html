@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>株式トレード練習 - ログイン</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="dark login-page">
+  <div class="login-container">
+    <h1>📈 株式トレード練習</h1>
+    <p class="subtitle">仮想資金100万円でトレードを練習しよう</p>
+
+    <div class="tab-switch">
+      <button class="tab-btn active" data-tab="login">ログイン</button>
+      <button class="tab-btn" data-tab="register">新規登録</button>
+    </div>
+
+    <div id="loginForm" class="auth-form">
+      <input type="text" id="loginUsername" placeholder="ユーザー名" autocomplete="username">
+      <input type="password" id="loginPassword" placeholder="パスワード" autocomplete="current-password">
+      <button id="loginBtn" class="btn-primary">ログイン</button>
+      <div id="loginMsg" class="msg"></div>
+    </div>
+
+    <div id="registerForm" class="auth-form hidden">
+      <input type="text" id="regUsername" placeholder="ユーザー名 (2〜20文字)" autocomplete="username">
+      <input type="password" id="regPassword" placeholder="パスワード (4文字以上)" autocomplete="new-password">
+      <button id="registerBtn" class="btn-primary">登録してはじめる</button>
+      <div id="registerMsg" class="msg"></div>
+    </div>
+
+    <div class="guest-divider"><span>または</span></div>
+    <button id="guestBtn" class="btn-guest">ログインせずに遊ぶ（ゲスト）</button>
+  </div>
+
+  <script>
+    (async () => {
+      const res = await fetch('/api/auth/me');
+      const me = await res.json();
+      if (me.loggedIn) location.href = '/trade.html';
+    })();
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
+        document.getElementById(btn.dataset.tab + 'Form').classList.remove('hidden');
+      });
+    });
+
+    async function authRequest(url, username, password, msgId) {
+      const msgEl = document.getElementById(msgId);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        location.href = '/trade.html';
+      } else {
+        msgEl.textContent = data.error;
+        msgEl.className = 'msg error';
+      }
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', () => {
+      authRequest('/api/auth/login',
+        document.getElementById('loginUsername').value,
+        document.getElementById('loginPassword').value,
+        'loginMsg');
+    });
+
+    document.getElementById('registerBtn').addEventListener('click', () => {
+      authRequest('/api/auth/register',
+        document.getElementById('regUsername').value,
+        document.getElementById('regPassword').value,
+        'registerMsg');
+    });
+
+    document.getElementById('guestBtn').addEventListener('click', () => {
+      location.href = '/trade.html';
+    });
+
+    ['loginUsername','loginPassword','regUsername','regPassword'].forEach(id => {
+      document.getElementById(id).addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          const btn = id.startsWith('login') ? 'loginBtn' : 'registerBtn';
+          document.getElementById(btn).click();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
