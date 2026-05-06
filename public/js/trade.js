@@ -77,7 +77,7 @@ function saveIndicatorSettings() {
   localStorage.setItem('indicatorSettings', JSON.stringify(indicatorSettings));
 }
 
-const DEFAULT_SHORTCUTS = { buy: '', short: '', close: '' };
+const DEFAULT_SHORTCUTS = { buy: '', short: '', close: '', changeSymbol: '' };
 let keyboardShortcuts = { ...DEFAULT_SHORTCUTS };
 
 function loadKeyboardShortcuts() {
@@ -1830,7 +1830,6 @@ function setupEvents() {
   document.addEventListener('keydown', e => {
     if (e.target.matches('input, textarea')) return;
     if (e.code === 'Space') { e.preventDefault(); if (gameActive) nextDay(); return; }
-    if (e.code === 'KeyN') { changeStock(); return; }
     const key = eventToKeyString(e);
     if (keyboardShortcuts.buy && key === keyboardShortcuts.buy) {
       e.preventDefault();
@@ -1842,6 +1841,11 @@ function setupEvents() {
       e.preventDefault();
       const execBtn = document.getElementById('executeBtn');
       if (execBtn && execBtn.style.display !== 'none') execBtn.click();
+    } else if (keyboardShortcuts.changeSymbol && key === keyboardShortcuts.changeSymbol) {
+      e.preventDefault();
+      changeStock();
+    } else if (e.code === 'KeyN' && !keyboardShortcuts.changeSymbol) {
+      changeStock();
     }
   });
 
