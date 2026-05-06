@@ -144,7 +144,9 @@
               <div class="data-stat-item"><span class="data-stat-num" id="statSymbols">-</span><span class="data-stat-lbl">銘柄数</span></div>
               <div class="data-stat-item"><span class="data-stat-num" id="statRows">-</span><span class="data-stat-lbl">総データ行数</span></div>
             </div>
-            <div class="settings-section-title" style="margin-top:14px">銘柄リスト更新（JPX）</div>
+            <div class="data-columns">
+              <div class="data-left">
+                <div class="settings-section-title" style="margin-top:14px">銘柄リスト更新（JPX）</div>
             <p class="data-hint"><a href="https://www.jpx.co.jp/markets/statistics-equities/misc/01.html" target="_blank" rel="noopener">JPX（上場銘柄一覧）</a>からXLS/XLSXをダウンロードし、ここで取り込むと銘柄リストが最新化される。新規上場・名称変更・上場廃止が自動反映される。</p>
             <input type="file" id="symbolsXlsPicker" accept=".xls,.xlsx" style="display:none">
             <div class="import-row">
@@ -199,15 +201,19 @@
               <div class="progress-text" id="yahooProgressText">準備中...</div>
             </div>
             <div class="import-result hidden" id="yahooResult"></div>
-            <div class="settings-section-title" style="margin-top:16px">
-              取込済み銘柄
-              <input type="text" id="symbolFilter" class="symbol-filter-input" placeholder="絞込">
-            </div>
-            <div class="symbol-table-wrap">
-              <table class="symbol-table">
-                <thead><tr><th>コード</th><th>銘柄名</th><th>件数</th><th>期間</th><th></th></tr></thead>
-                <tbody id="symbolTableBody"></tbody>
-              </table>
+              </div>
+              <div class="data-right">
+                <div class="settings-section-title" style="margin-top:0">
+                  取込済み銘柄
+                  <input type="text" id="symbolFilter" class="symbol-filter-input" placeholder="絞込">
+                </div>
+                <div class="symbol-table-wrap">
+                  <table class="symbol-table">
+                    <thead><tr><th>コード</th><th>銘柄名</th><th>件数</th><th>期間</th><th></th></tr></thead>
+                    <tbody id="symbolTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
 

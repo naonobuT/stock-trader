@@ -895,3 +895,26 @@ header {
   font-size: 11px;
   color: var(--text2);
 }
+
+/* Data Management 2-column layout */
+.data-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+.data-left {
+  /* Left column for import functions */
+}
+
+.data-right {
+  /* Right column for imported symbol list */
+  display: flex;
+  flex-direction: column;
+}
+
+.data-right .symbol-table-wrap {
+  max-height: 600px;
+  flex: 1;
+}
