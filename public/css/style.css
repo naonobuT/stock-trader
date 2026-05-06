@@ -919,6 +919,6 @@ header {
 }
 
 .data-right .symbol-table-wrap {
-  max-height: 600px;
+  max-height: calc(100vh - 200px);
   flex: 1;
 }
