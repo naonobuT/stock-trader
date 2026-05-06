@@ -525,6 +525,7 @@ header {
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px 20px;
+  max-width: 560px;
 }
 
 /* ===== SYMBOL BAR ===== */
@@ -893,6 +894,10 @@ header {
   padding: 8px 12px;
   font-size: 11px;
   color: var(--text2);
+}
+
+#tabData {
+  max-width: unset;
 }
 
 /* Data Management 2-column layout */
