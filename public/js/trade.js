@@ -219,6 +219,7 @@ async function init() {
   applyChartColors();
   setupChartResizer();
 
+  _startPrefetch();
   showStartModal();
 }
 
@@ -228,22 +229,22 @@ let _prefetchedStock = null;
 
 async function _prefetchRandomStock() {
   try {
-    const r = await fetch('/api/stocks/random');
+    const r = await fetch('/api/stocks/random-with-candles');
     if (!r.ok) return null;
-    const { symbol, name, oldName } = await r.json();
-    const cr = await fetch(`/api/stocks/candles/${symbol}?limit=1000`);
-    if (!cr.ok) return null;
-    const candles = await cr.json();
-    return { symbol, name, oldName, candles };
+    return await r.json();
   } catch {
     return null;
   }
 }
 
-function showStartModal() {
-  document.getElementById('startModal').classList.remove('hidden');
+function _startPrefetch() {
   _prefetchedStock = null;
   _prefetchPromise = _prefetchRandomStock().then(result => { _prefetchedStock = result; });
+}
+
+function showStartModal() {
+  document.getElementById('startModal').classList.remove('hidden');
+  if (!_prefetchedStock && !_prefetchPromise) _startPrefetch();
 }
 
 // --- Start game ---
@@ -269,6 +270,7 @@ async function startGame() {
   if (!ok) return;
 
   document.getElementById('startModal').classList.add('hidden');
+  _startPrefetch();
 }
 
 async function changeToSymbol(symbol, name = null, oldName = null) {
@@ -297,10 +299,18 @@ async function changeStock() {
   btn.disabled = true;
 
   try {
-    const r = await fetch('/api/stocks/random');
-    if (!r.ok) return;
-    const { symbol, name, oldName } = await r.json();
-    await applyNewStock(symbol, null, null, name, oldName);
+    if (!_prefetchedStock && _prefetchPromise) await _prefetchPromise;
+    let symbol, name, oldName, candles;
+    if (_prefetchedStock) {
+      ({ symbol, name, oldName, candles } = _prefetchedStock);
+      _prefetchedStock = null;
+    } else {
+      const r = await fetch('/api/stocks/random-with-candles');
+      if (!r.ok) return;
+      ({ symbol, name, oldName, candles } = await r.json());
+    }
+    await applyNewStock(symbol, null, candles, name, oldName);
+    _startPrefetch();
   } finally {
     isChangingStock = false;
     btn.textContent = '🎲 銘柄変更[N]';

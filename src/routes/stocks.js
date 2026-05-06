@@ -8,12 +8,22 @@ const router = express.Router();
 
 router.get('/random', (req, res) => {
   const db = getDb();
-  const row = db.prepare(
-    'SELECT symbol FROM price_cache GROUP BY symbol ORDER BY RANDOM() LIMIT 1'
-  ).get();
+  const row = db.prepare('SELECT symbol FROM symbol_stats ORDER BY RANDOM() LIMIT 1').get();
   if (!row) return res.status(404).json({ error: 'データがありません' });
   const entry = getSymbolEntry(row.symbol);
   res.json({ symbol: row.symbol, name: entry?.name || null, oldName: entry?.oldName || null });
+});
+
+router.get('/random-with-candles', (req, res) => {
+  const db = getDb();
+  const row = db.prepare('SELECT symbol FROM symbol_stats ORDER BY RANDOM() LIMIT 1').get();
+  if (!row) return res.status(404).json({ error: 'データがありません' });
+  const symbol = row.symbol;
+  const entry = getSymbolEntry(symbol);
+  const rows = db.prepare(
+    'SELECT date, open, high, low, close, volume FROM price_cache WHERE symbol = ? ORDER BY date DESC LIMIT 1000'
+  ).all(symbol).reverse();
+  res.json({ symbol, name: entry?.name || null, oldName: entry?.oldName || null, candles: rows });
 });
 
 router.get('/search', (req, res) => {
