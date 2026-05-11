@@ -28,10 +28,13 @@ async function jquantsFetch(url) {
 
 /**
  * APIキーを検証してDBに保存
- * 日付に依存しない /v2/listed/info で疎通確認
+ * 実際のデータ取得エンドポイントで疎通確認（トヨタ、1日分）
  */
 async function saveApiKeyAndTest(apiKey) {
-  const res = await fetch(`${BASE_URL}/listed/info?code=86970`, {
+  if (!apiKey || /[^\x20-\x7E]/.test(apiKey)) {
+    throw new Error('APIキーに使用できない文字が含まれています。半角英数字・記号のみ使用できます。');
+  }
+  const res = await fetch(`${BASE_URL}/equities/bars/daily?code=72030&from=2024-03-01&to=2024-03-01`, {
     headers: { 'x-api-key': apiKey },
   });
   if (!res.ok) {
