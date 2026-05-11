@@ -8,7 +8,7 @@ const router = express.Router();
 
 router.get('/random', (req, res) => {
   const db = getDb();
-  const row = db.prepare('SELECT symbol FROM symbol_stats ORDER BY RANDOM() LIMIT 1').get();
+  const row = db.prepare('SELECT symbol FROM symbol_stats WHERE row_count >= 300 ORDER BY RANDOM() LIMIT 1').get();
   if (!row) return res.status(404).json({ error: 'データがありません' });
   const entry = getSymbolEntry(row.symbol);
   res.json({ symbol: row.symbol, name: entry?.name || null, oldName: entry?.oldName || null });
@@ -16,7 +16,7 @@ router.get('/random', (req, res) => {
 
 router.get('/random-with-candles', (req, res) => {
   const db = getDb();
-  const row = db.prepare('SELECT symbol FROM symbol_stats ORDER BY RANDOM() LIMIT 1').get();
+  const row = db.prepare('SELECT symbol FROM symbol_stats WHERE row_count >= 300 ORDER BY RANDOM() LIMIT 1').get();
   if (!row) return res.status(404).json({ error: 'データがありません' });
   const symbol = row.symbol;
   const entry = getSymbolEntry(symbol);
@@ -33,21 +33,31 @@ router.get('/search', (req, res) => {
   const query = q.trim();
   const db = getDb();
 
-  // コード前方一致
-  const byCode = db.prepare(
-    'SELECT DISTINCT symbol FROM price_cache WHERE symbol LIKE ? LIMIT 20'
-  ).all(`${query.toUpperCase()}%`).map(r => r.symbol);
+  // コード前方一致（symbols.csv全体から）
+  const { getAllStockCodes } = require('../symbolNames');
+  const upperQ = query.toUpperCase();
+  const byCode = getAllStockCodes()
+    .filter(code => code.startsWith(upperQ))
+    .slice(0, 20);
 
-  // 社名部分一致（price_cacheに存在するものだけ）
-  const existsStmt = db.prepare('SELECT 1 FROM price_cache WHERE symbol = ? LIMIT 1');
+  // 社名部分一致（symbols.csv全体から）
   const byName = searchByName(query, 40)
-    .filter(code => !byCode.includes(code) && existsStmt.get(code))
+    .filter(code => !byCode.includes(code))
     .slice(0, 20);
 
   const allCodes = [...byCode, ...byName].slice(0, 20);
+
+  // データ有無を一括確認
+  const hasDataSet = allCodes.length > 0
+    ? new Set(
+        db.prepare(`SELECT symbol FROM symbol_stats WHERE symbol IN (${allCodes.map(() => '?').join(',')})`)
+          .all(...allCodes).map(r => r.symbol)
+      )
+    : new Set();
+
   const results = allCodes.map(symbol => {
     const entry = getSymbolEntry(symbol);
-    return { symbol, name: entry?.name || null, oldName: entry?.oldName || null };
+    return { symbol, name: entry?.name || null, oldName: entry?.oldName || null, hasData: hasDataSet.has(symbol) };
   });
 
   res.json(results);

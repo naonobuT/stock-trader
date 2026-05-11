@@ -278,6 +278,7 @@ router.post('/jquants/download', async (req, res) => {
 
 // J-Quants: 既存銘柄の差分更新（SSE）
 router.post('/jquants/update', async (req, res) => {
+  const { period2, plan } = req.body;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -289,7 +290,9 @@ router.post('/jquants/update', async (req, res) => {
   try {
     const result = await jquants.downloadUpdate(
       ({ done, total, symbol }) => send({ type: 'progress', done, total, symbol }),
-      () => aborted
+      () => aborted,
+      period2 || null,
+      plan || null
     );
     if (!aborted) {
       if (result.totalInserted > 0) { refreshSymbolStats(); invalidateCache(); }
@@ -303,6 +306,7 @@ router.post('/jquants/update', async (req, res) => {
 
 // J-Quants: 未取込銘柄の一括取得（SSE）
 router.post('/jquants/fill', async (req, res) => {
+  const { period1, period2, plan } = req.body;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -313,9 +317,11 @@ router.post('/jquants/fill', async (req, res) => {
 
   try {
     const result = await jquants.downloadMissing(
-      '2000-01-01',
+      period1 || '2000-01-01',
       ({ done, total, symbol }) => send({ type: 'progress', done, total, symbol }),
-      () => aborted
+      () => aborted,
+      period2 || null,
+      plan || null
     );
     if (!aborted) {
       if (result.totalInserted > 0) { refreshSymbolStats(); invalidateCache(); }

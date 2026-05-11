@@ -42,6 +42,10 @@
       <p>ランダムな銘柄・時代からトレードを練習しよう</p>
       <div id="startMsg" class="msg"></div>
       <button id="startGameBtn" class="btn-primary" style="margin-top:8px">ゲーム開始</button>
+      <div id="startNoDataMsg" class="msg error" style="display:none;margin-top:8px">
+        株価データがありません。<br>
+        <a href="#" id="startGoSettings" style="color:#f87171">設定</a>からJ-Quantsで株価データをダウンロードしてください。
+      </div>
     </div>
   </div>
 
@@ -187,14 +191,29 @@
               <input type="password" id="jqApiKeyInput" class="import-path" placeholder="APIキー（x-api-key）を入力" style="font-family:monospace">
               <button id="jqSaveKeyBtn" class="btn-small">保存・テスト</button>
             </div>
-            <div class="yahoo-auto-row" style="margin-top:8px">
+            <table class="jq-plan-table">
+              <thead><tr><th>プラン</th><th>取得可能期間</th><th>開始日目安</th><th>目安時間</th><th></th></tr></thead>
+              <tbody>
+                <tr><td>Free</td><td>直近12週間を除く2年分</td><td id="jqPlanDate0">-</td><td>約1.5時間<span class="plan-calc">（460日×13秒）</span></td><td><button class="btn-jq-plan" data-years="2" data-to-weeks="12" data-plan="free">設定</button></td></tr>
+                <tr><td>Light</td><td>過去5年分</td><td id="jqPlanDate1">-</td><td>約1.5時間<span class="plan-calc">（1,300日×4秒）</span></td><td><button class="btn-jq-plan" data-years="5" data-plan="light">設定</button></td></tr>
+                <tr><td>Standard</td><td>過去10年分</td><td id="jqPlanDate2">-</td><td>約2.5時間<span class="plan-calc">（2,600日×4秒）</span></td><td><button class="btn-jq-plan" data-years="10" data-plan="standard">設定</button></td></tr>
+                <tr><td>Premium</td><td>過去20年分（最長）</td><td id="jqPlanDate3">-</td><td>約5時間<span class="plan-calc">（5,200日×4秒）</span></td><td><button class="btn-jq-plan" data-years="20" data-plan="premium">設定</button></td></tr>
+              </tbody>
+            </table>
+            <div class="yahoo-period-row" style="margin-top:8px;margin-bottom:8px">
+              <label class="format-label">取得開始日</label>
+              <input type="date" id="jqAutoFrom" class="yahoo-date-input">
+              <label class="format-label">〜</label>
+              <input type="date" id="jqAutoTo" class="yahoo-date-input">
+            </div>
+            <div class="yahoo-auto-row">
               <div class="yahoo-auto-btn-group">
                 <button id="jqUpdateBtn" class="btn-yahoo-auto">既存銘柄を最新化</button>
-                <span class="yahoo-auto-desc">DBにある全銘柄の最終日〜今日を補完</span>
+                <span class="yahoo-auto-desc">DBにある全銘柄の最終日〜終了日を補完</span>
               </div>
               <div class="yahoo-auto-btn-group">
                 <button id="jqFillBtn" class="btn-yahoo-auto">未取込銘柄を一括取得</button>
-                <span class="yahoo-auto-desc">DBにない銘柄を2000年〜今日で補完</span>
+                <span class="yahoo-auto-desc">DBにない銘柄を開始日〜終了日で補完</span>
               </div>
               <button id="jqStopBtn" class="btn-yahoo-stop hidden">■ 中断</button>
             </div>

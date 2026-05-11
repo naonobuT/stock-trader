@@ -55,6 +55,20 @@ let chartColors = { ...DEFAULT_COLORS };
 const DEFAULT_INDICATORS = { showBB: false, showBB3: false, showRSI: false, showMACD: false };
 let indicatorSettings = { ...DEFAULT_INDICATORS };
 
+const colorInputIds = ['colorUpCandle', 'colorDownCandle', 'colorMa1', 'colorMa2', 'colorMa3', 'colorVolUp', 'colorVolDown', 'colorBBBand', 'colorBBMid', 'colorBBBand3', 'colorRSILine', 'colorMACDLine', 'colorSignalLine'];
+const colorKeys     = ['upCandle',      'downCandle',      'ma1',      'ma2',      'ma3',      'volUp',      'volDown',      'bbBand',      'bbMid',      'bb3Band',     'rsiLine',      'macdLine',      'signalLine'];
+
+function syncSettingsInputs() {
+  colorInputIds.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (el) el.value = chartColors[colorKeys[i]];
+  });
+  document.getElementById('showBB').checked   = indicatorSettings.showBB;
+  document.getElementById('showBB3').checked  = indicatorSettings.showBB3;
+  document.getElementById('showRSI').checked  = indicatorSettings.showRSI;
+  document.getElementById('showMACD').checked = indicatorSettings.showMACD;
+}
+
 function loadChartColors() {
   try {
     const saved = localStorage.getItem('chartColors');
@@ -245,6 +259,21 @@ function _startPrefetch() {
 function showStartModal() {
   document.getElementById('startModal').classList.remove('hidden');
   if (!_prefetchedStock && !_prefetchPromise) _startPrefetch();
+
+  const btn = document.getElementById('startGameBtn');
+  const noDataMsg = document.getElementById('startNoDataMsg');
+
+  (_prefetchPromise || Promise.resolve()).then(() => {
+    const hasData = !!_prefetchedStock;
+    btn.style.display = hasData ? '' : 'none';
+    noDataMsg.style.display = hasData ? 'none' : '';
+  });
+
+  document.getElementById('startGoSettings').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('startModal').classList.add('hidden');
+    switchView('settings');
+  }, { once: true });
 }
 
 // --- Start game ---
@@ -1748,20 +1777,6 @@ function setupEvents() {
     });
   }
 
-  const colorInputIds  = ['colorUpCandle', 'colorDownCandle', 'colorMa1', 'colorMa2', 'colorMa3', 'colorVolUp', 'colorVolDown', 'colorBBBand', 'colorBBMid', 'colorBBBand3', 'colorRSILine', 'colorMACDLine', 'colorSignalLine'];
-  const colorKeys      = ['upCandle',      'downCandle',      'ma1',      'ma2',      'ma3',      'volUp',      'volDown',      'bbBand',      'bbMid',      'bb3Band',     'rsiLine',      'macdLine',      'signalLine'];
-
-  function syncSettingsInputs() {
-    colorInputIds.forEach((id, i) => {
-      const el = document.getElementById(id);
-      if (el) el.value = chartColors[colorKeys[i]];
-    });
-    document.getElementById('showBB').checked   = indicatorSettings.showBB;
-    document.getElementById('showBB3').checked  = indicatorSettings.showBB3;
-    document.getElementById('showRSI').checked  = indicatorSettings.showRSI;
-    document.getElementById('showMACD').checked = indicatorSettings.showMACD;
-  }
-
   colorInputIds.forEach((id, i) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1889,7 +1904,7 @@ function setupEvents() {
   searchInput.addEventListener('input', () => {
     clearTimeout(searchTimer);
     const q = searchInput.value.trim();
-    if (!q) { searchDropdown.classList.add('hidden'); return; }
+    if (!q) { searchDropdown.classList.add('hidden'); searchResults = []; return; }
     searchTimer = setTimeout(() => fetchSearchResults(q), 180);
   });
 
@@ -1936,9 +1951,9 @@ function setupEvents() {
       searchDropdown.innerHTML = '<div class="search-empty">該当なし</div>';
     } else {
       searchDropdown.innerHTML = searchResults.map((r, i) => `
-        <div class="search-result${i === searchActiveIdx ? ' active' : ''}" data-idx="${i}">
+        <div class="search-result${i === searchActiveIdx ? ' active' : ''}${r.hasData === false ? ' no-data' : ''}" data-idx="${i}">
           <span class="search-code">${r.symbol}</span>
-          <span class="search-name">${r.name || r.symbol}</span>
+          <span class="search-name">${r.name || r.symbol}${r.hasData === false ? ' <span class="no-data-badge">未取得</span>' : ''}</span>
         </div>
       `).join('');
       searchDropdown.querySelectorAll('.search-result').forEach(el => {
@@ -2234,7 +2249,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     }
   });
 
-  function startJqAutoDownload(endpoint) {
+  function startJqAutoDownload(endpoint, body) {
     const updateBtn   = document.getElementById('jqUpdateBtn');
     const fillBtn     = document.getElementById('jqFillBtn');
     const stopBtn     = document.getElementById('jqStopBtn');
@@ -2253,7 +2268,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     let abortController = new AbortController();
     stopBtn.onclick = () => abortController.abort();
 
-    fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: abortController.signal })
+    fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), signal: abortController.signal })
       .then(async response => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -2269,7 +2284,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
             if (msg.type === 'progress') {
               const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
               progressBar.style.width = pct + '%';
-              progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}`;
+              progressText.textContent = `${msg.done} / ${msg.total} 日付取得中${msg.symbol ? ` (${msg.symbol})` : ''}`;
             } else if (msg.type === 'done') {
               progressBar.style.width = '100%';
               progressText.textContent = '完了';
@@ -2291,14 +2306,6 @@ document.querySelectorAll('.view-tab').forEach(tab => {
         stopBtn.classList.add('hidden');
       });
   }
-
-  document.getElementById('jqUpdateBtn').addEventListener('click', () => {
-    startJqAutoDownload('/api/admin/jquants/update');
-  });
-  document.getElementById('jqFillBtn').addEventListener('click', () => {
-    if (!confirm('DBにない全銘柄を2000年〜今日で取得します。時間がかかる場合があります。続行しますか？')) return;
-    startJqAutoDownload('/api/admin/jquants/fill');
-  });
 
   document.getElementById('jqDownloadBtn').addEventListener('click', async () => {
     const raw = document.getElementById('jqSymbols').value;
@@ -2364,14 +2371,65 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     }
   });
 
-  // J-Quants デフォルト期間（過去1年）
+  // J-Quants 日付初期化
   (function() {
-    const to = new Date();
-    const from = new Date();
-    from.setFullYear(from.getFullYear() - 1);
     const fmt = d => d.toISOString().slice(0, 10);
-    document.getElementById('jqPeriod1').value = fmt(from);
-    document.getElementById('jqPeriod2').value = fmt(to);
+    const today = new Date();
+
+    // 個別銘柄ダウンロードのデフォルト（過去1年）
+    const from1y = new Date(today); from1y.setFullYear(today.getFullYear() - 1);
+    document.getElementById('jqPeriod1').value = fmt(from1y);
+    document.getElementById('jqPeriod2').value = fmt(today);
+
+    // 一括取得のデフォルト終了日=今日
+    document.getElementById('jqAutoTo').value = fmt(today);
+
+    // プランテーブルの開始日目安を計算して表示
+    const plans = [
+      { elId: 'jqPlanDate0', years: 2 },
+      { elId: 'jqPlanDate1', years: 5 },
+      { elId: 'jqPlanDate2', years: 10 },
+      { elId: 'jqPlanDate3', years: 20 },
+    ];
+    plans.forEach(p => {
+      const d = new Date(today);
+      d.setFullYear(d.getFullYear() - p.years);
+      const el = document.getElementById(p.elId);
+      if (el) el.textContent = fmt(d);
+    });
+
+    // クイック設定ボタン
+    let selectedPlan = null;
+    document.querySelectorAll('.btn-jq-plan').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const fromDate = new Date(today);
+        fromDate.setFullYear(fromDate.getFullYear() - parseInt(btn.dataset.years));
+        document.getElementById('jqAutoFrom').value = fmt(fromDate);
+        // Freeプランは終了日も12週前に設定
+        if (btn.dataset.toWeeks) {
+          const toDate = new Date(today);
+          toDate.setDate(toDate.getDate() - parseInt(btn.dataset.toWeeks) * 7);
+          document.getElementById('jqAutoTo').value = fmt(toDate);
+        } else {
+          document.getElementById('jqAutoTo').value = fmt(today);
+        }
+        selectedPlan = btn.dataset.plan || null;
+        document.querySelectorAll('.btn-jq-plan').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    document.getElementById('jqUpdateBtn').addEventListener('click', () => {
+      const period2 = document.getElementById('jqAutoTo').value || null;
+      startJqAutoDownload('/api/admin/jquants/update', { period2, plan: selectedPlan });
+    });
+    document.getElementById('jqFillBtn').addEventListener('click', () => {
+      const period1 = document.getElementById('jqAutoFrom').value;
+      const period2 = document.getElementById('jqAutoTo').value || null;
+      if (!period1) { alert('取得開始日を指定してください'); return; }
+      if (!confirm(`DBにない全銘柄を ${period1} 〜 ${period2 || '今日'} で取得します。時間がかかる場合があります。続行しますか？`)) return;
+      startJqAutoDownload('/api/admin/jquants/fill', { period1, period2, plan: selectedPlan });
+    });
   })();
 
 })();
