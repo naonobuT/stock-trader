@@ -116,7 +116,7 @@ function eventToKeyString(e) {
 }
 
 function renderShortcutDisplays() {
-  for (const action of ['buy', 'short', 'close']) {
+  for (const action of ['buy', 'short', 'close', 'changeSymbol']) {
     const el = document.getElementById(`keyDisplay-${action}`);
     if (el) el.textContent = keyboardShortcuts[action] || '';
   }
@@ -584,6 +584,8 @@ async function nextDay() {
       const msgEl = document.getElementById('orderMsg');
       msgEl.innerHTML = stopMsgs.join('<br>');
       msgEl.className = 'msg error';
+      clearTimeout(msgEl._stopTimer);
+      msgEl._stopTimer = setTimeout(() => { msgEl.innerHTML = ''; msgEl.className = ''; }, 5000);
     }
   }
 
@@ -1297,7 +1299,7 @@ function renderPnlData(data) {
         data: values,
         borderColor: lineColor,
         backgroundColor: pnlFinalValue >= 0 ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+        fill: true, tension: 0, pointRadius: 0, borderWidth: 1.5,
       }, {
         data: labels.map(() => 0),
         borderColor: '#4b5563', borderDash: [4, 4],
@@ -1358,7 +1360,7 @@ function updatePnlLarge(labels, values, lineColor) {
       labels,
       datasets: [{
         data: values, borderColor: lineColor, backgroundColor: bgColor,
-        fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2,
+        fill: true, tension: 0, pointRadius: 2, borderWidth: 2,
       }, {
         data: labels.map(() => 0),
         borderColor: '#4b5563', borderDash: [4, 4],
@@ -1510,7 +1512,7 @@ function renderComparisonChart() {
           data: vals,
           borderColor: COMP_COLORS[i].border,
           backgroundColor: COMP_COLORS[i].bg,
-          fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+          fill: true, tension: 0, pointRadius: 0, borderWidth: 1.5,
         }))),
         {
           data: labels.map(() => 0),
@@ -1567,7 +1569,7 @@ function updateComparisonLarge(labels, riskValues, percentValues, sharesValues, 
   const datasets3 = [riskValues, percentValues, sharesValues].map((vals, i) => ({
     label: allLabels[i], data: vals,
     borderColor: COMP_COLORS[i].border, backgroundColor: COMP_COLORS[i].bg,
-    fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2,
+    fill: true, tension: 0, pointRadius: 2, borderWidth: 2,
   }));
   if (comparisonChartLarge) {
     comparisonChartLarge.data.labels = labels;

@@ -15,6 +15,7 @@ COPY server.js ./
 
 # 株価データを同梱（テスト: 100銘柄 / 本番: 全銘柄）
 COPY stockdata/ ./stockdata/
+COPY data/ ./data/
 
 # DB 永続化用ディレクトリ
 RUN mkdir -p /data
