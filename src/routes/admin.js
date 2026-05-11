@@ -6,6 +6,8 @@ const { getDb, refreshSymbolStats } = require('../db');
 const { importFromDir, importFromBuffers, getFormats } = require('../importCsv');
 const { getSymbolEntry, reloadSymbols } = require('../symbolNames');
 const { downloadSymbols, downloadUpdate, downloadMissing } = require('../yahooDownload');
+const jquants = require('../jquantsDownload');
+const { saveApiKeyAndTest, getAuthStatus } = require('../jquantsAuth');
 
 const router = express.Router();
 
@@ -318,6 +320,98 @@ router.delete('/symbol/:symbol', (req, res) => {
     invalidateCache();
   }
   res.json({ deleted: info.changes });
+});
+
+// J-Quants: 認証状態
+router.get('/jquants/status', (req, res) => {
+  res.json(getAuthStatus());
+});
+
+// J-Quants: APIキー保存・接続テスト
+router.post('/jquants/credentials', async (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey) return res.status(400).json({ error: 'APIキーを入力してください' });
+  try {
+    await saveApiKeyAndTest(apiKey);
+    res.json({ success: true, status: getAuthStatus() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// J-Quants: 銘柄指定ダウンロード（SSE）
+router.post('/jquants/download', async (req, res) => {
+  const { symbols, period1, period2 } = req.body;
+  if (!symbols || !symbols.length) return res.status(400).json({ error: '銘柄コードが指定されていません' });
+  if (!period1 || !period2)        return res.status(400).json({ error: '取得期間を指定してください' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  try {
+    const result = await jquants.downloadSymbols(symbols, period1, period2, ({ done, total, symbol }) => {
+      send({ type: 'progress', done, total, symbol });
+    });
+    if (result.totalInserted > 0) { refreshSymbolStats(); invalidateCache(); }
+    send({ type: 'done', ...result });
+  } catch (err) {
+    send({ type: 'error', message: err.message });
+  }
+  res.end();
+});
+
+// J-Quants: 既存銘柄の差分更新（SSE）
+router.post('/jquants/update', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  let aborted = false;
+  res.on('close', () => { aborted = true; });
+
+  try {
+    const result = await jquants.downloadUpdate(
+      ({ done, total, symbol }) => send({ type: 'progress', done, total, symbol }),
+      () => aborted
+    );
+    if (!aborted) {
+      if (result.totalInserted > 0) { refreshSymbolStats(); invalidateCache(); }
+      send({ type: 'done', ...result });
+    }
+  } catch (err) {
+    send({ type: 'error', message: err.message });
+  }
+  res.end();
+});
+
+// J-Quants: 未取込銘柄の一括取得（SSE）
+router.post('/jquants/fill', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  let aborted = false;
+  res.on('close', () => { aborted = true; });
+
+  try {
+    const result = await jquants.downloadMissing(
+      '2000-01-01',
+      ({ done, total, symbol }) => send({ type: 'progress', done, total, symbol }),
+      () => aborted
+    );
+    if (!aborted) {
+      if (result.totalInserted > 0) { refreshSymbolStats(); invalidateCache(); }
+      send({ type: 'done', ...result });
+    }
+  } catch (err) {
+    send({ type: 'error', message: err.message });
+  }
+  res.end();
 });
 
 module.exports = router;

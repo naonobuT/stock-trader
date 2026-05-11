@@ -209,6 +209,47 @@
               <div class="progress-text" id="yahooProgressText">準備中...</div>
             </div>
             <div class="import-result hidden" id="yahooResult"></div>
+            <div class="settings-section-title" style="margin-top:16px">J-Quants APIダウンロード</div>
+            <div id="jqStatusBar" class="import-result hidden" style="margin-bottom:8px"></div>
+            <p class="data-hint">
+              JPX提供の <a href="https://jpx-jquants.com/" target="_blank" rel="noopener" style="color:var(--accent)">J-Quants API</a> で株価データを取得。
+              APIキーをサイトで取得してください。
+            </p>
+            <div class="import-row" style="margin-bottom:6px">
+              <input type="password" id="jqApiKeyInput" class="import-path" placeholder="APIキー（x-api-key）を入力" style="font-family:monospace">
+              <button id="jqSaveKeyBtn" class="btn-small">保存・テスト</button>
+            </div>
+            <div class="yahoo-auto-row" style="margin-top:8px">
+              <div class="yahoo-auto-btn-group">
+                <button id="jqUpdateBtn" class="btn-yahoo-auto">既存銘柄を最新化</button>
+                <span class="yahoo-auto-desc">DBにある全銘柄の最終日〜今日を補完</span>
+              </div>
+              <div class="yahoo-auto-btn-group">
+                <button id="jqFillBtn" class="btn-yahoo-auto">未取込銘柄を一括取得</button>
+                <span class="yahoo-auto-desc">DBにない銘柄を2000年〜今日で補完</span>
+              </div>
+              <button id="jqStopBtn" class="btn-yahoo-stop hidden">■ 中断</button>
+            </div>
+            <div class="progress-wrap hidden" id="jqAutoProgressWrap">
+              <div class="progress-bar-bg"><div class="progress-bar-fill" id="jqAutoProgressBar"></div></div>
+              <div class="progress-text" id="jqAutoProgressText"></div>
+            </div>
+            <div class="import-result hidden" id="jqAutoResult"></div>
+            <div class="settings-section-title" style="margin-top:12px">個別銘柄を指定して取得</div>
+            <p class="data-hint">銘柄コードをカンマ・改行で区切って入力。</p>
+            <textarea id="jqSymbols" class="yahoo-symbols-input" placeholder="例: 7203&#10;9984&#10;6758"></textarea>
+            <div class="yahoo-period-row">
+              <label class="format-label">取得開始日</label>
+              <input type="date" id="jqPeriod1" class="yahoo-date-input">
+              <label class="format-label">〜</label>
+              <input type="date" id="jqPeriod2" class="yahoo-date-input">
+              <button id="jqDownloadBtn" class="btn-small">取得開始</button>
+            </div>
+            <div class="progress-wrap hidden" id="jqProgressWrap">
+              <div class="progress-bar-bg"><div class="progress-bar-fill" id="jqProgressBar"></div></div>
+              <div class="progress-text" id="jqProgressText">準備中...</div>
+            </div>
+            <div class="import-result hidden" id="jqResult"></div>
               </div>
               <div class="data-right">
                 <div class="settings-section-title" style="margin-top:0">

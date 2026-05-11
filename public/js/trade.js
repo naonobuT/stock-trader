@@ -2291,6 +2291,197 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     startAutoDownload('/api/admin/yahoo-fill');
   });
 
+  // --- J-Quants ---
+  (async function loadJqStatus() {
+    try {
+      const r = await fetch('/api/admin/jquants/status');
+      const s = await r.json();
+      const bar = document.getElementById('jqStatusBar');
+      bar.classList.remove('hidden');
+      if (s.configured) {
+        bar.className = 'import-result success';
+        bar.textContent = `J-Quants APIキー設定済み: ${s.maskedKey}`;
+      } else {
+        bar.className = 'import-result';
+        bar.style.background = 'rgba(239,68,68,0.08)';
+        bar.style.color = 'var(--up)';
+        bar.textContent = 'J-Quants APIキー未設定';
+      }
+    } catch {}
+  })();
+
+  document.getElementById('jqSaveKeyBtn').addEventListener('click', async () => {
+    const apiKey = document.getElementById('jqApiKeyInput').value.trim();
+    if (!apiKey) { alert('APIキーを入力してください'); return; }
+    const btn = document.getElementById('jqSaveKeyBtn');
+    btn.disabled = true; btn.textContent = 'テスト中...';
+    try {
+      const r = await fetch('/api/admin/jquants/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = await r.json();
+      const bar = document.getElementById('jqStatusBar');
+      bar.classList.remove('hidden');
+      if (r.ok) {
+        bar.className = 'import-result success';
+        bar.textContent = `接続成功：APIキーを保存しました（${data.status?.maskedKey ?? ''}）`;
+        document.getElementById('jqApiKeyInput').value = '';
+      } else {
+        bar.className = 'import-result error';
+        bar.textContent = data.error || '保存に失敗しました';
+      }
+    } catch (err) {
+      const bar = document.getElementById('jqStatusBar');
+      bar.classList.remove('hidden');
+      bar.className = 'import-result error';
+      bar.textContent = 'エラー: ' + err.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '保存・テスト';
+    }
+  });
+
+  function startJqAutoDownload(endpoint) {
+    const updateBtn   = document.getElementById('jqUpdateBtn');
+    const fillBtn     = document.getElementById('jqFillBtn');
+    const stopBtn     = document.getElementById('jqStopBtn');
+    const progressWrap = document.getElementById('jqAutoProgressWrap');
+    const progressBar  = document.getElementById('jqAutoProgressBar');
+    const progressText = document.getElementById('jqAutoProgressText');
+    const resultBox    = document.getElementById('jqAutoResult');
+
+    updateBtn.disabled = true; fillBtn.disabled = true;
+    stopBtn.classList.remove('hidden');
+    progressWrap.classList.remove('hidden');
+    resultBox.classList.add('hidden');
+    progressBar.style.width = '0%';
+    progressText.textContent = '準備中...';
+
+    let abortController = new AbortController();
+    stopBtn.onclick = () => abortController.abort();
+
+    fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: abortController.signal })
+      .then(async response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n'); buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const msg = JSON.parse(line.slice(6));
+            if (msg.type === 'progress') {
+              const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
+              progressBar.style.width = pct + '%';
+              progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}`;
+            } else if (msg.type === 'done') {
+              progressBar.style.width = '100%';
+              progressText.textContent = '完了';
+              resultBox.className = 'import-result success';
+              resultBox.classList.remove('hidden');
+              resultBox.textContent = `完了：${msg.totalInserted?.toLocaleString() ?? 0} 行追加` +
+                (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
+              loadAdminStats();
+            } else if (msg.type === 'error') {
+              resultBox.className = 'import-result error';
+              resultBox.classList.remove('hidden');
+              resultBox.textContent = msg.message;
+            }
+          }
+        }
+      }).catch(() => {})
+      .finally(() => {
+        updateBtn.disabled = false; fillBtn.disabled = false;
+        stopBtn.classList.add('hidden');
+      });
+  }
+
+  document.getElementById('jqUpdateBtn').addEventListener('click', () => {
+    startJqAutoDownload('/api/admin/jquants/update');
+  });
+  document.getElementById('jqFillBtn').addEventListener('click', () => {
+    if (!confirm('DBにない全銘柄を2000年〜今日で取得します。時間がかかる場合があります。続行しますか？')) return;
+    startJqAutoDownload('/api/admin/jquants/fill');
+  });
+
+  document.getElementById('jqDownloadBtn').addEventListener('click', async () => {
+    const raw = document.getElementById('jqSymbols').value;
+    const symbols = raw.split(/[\s,、，]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+    if (!symbols.length) { alert('銘柄コードを入力してください'); return; }
+    const period1 = document.getElementById('jqPeriod1').value;
+    const period2 = document.getElementById('jqPeriod2').value;
+    if (!period1 || !period2) { alert('取得期間を指定してください'); return; }
+
+    const btn = document.getElementById('jqDownloadBtn');
+    btn.disabled = true; btn.textContent = '取得中...';
+    const progressWrap = document.getElementById('jqProgressWrap');
+    const progressBar  = document.getElementById('jqProgressBar');
+    const progressText = document.getElementById('jqProgressText');
+    const resultBox    = document.getElementById('jqResult');
+    progressWrap.classList.remove('hidden');
+    resultBox.classList.add('hidden');
+    progressBar.style.width = '0%';
+    progressText.textContent = '準備中...';
+
+    try {
+      const response = await fetch('/api/admin/jquants/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols, period1, period2 }),
+      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n'); buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const msg = JSON.parse(line.slice(6));
+          if (msg.type === 'progress') {
+            const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
+            progressBar.style.width = pct + '%';
+            progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}`;
+          } else if (msg.type === 'done') {
+            progressBar.style.width = '100%';
+            progressText.textContent = '完了';
+            resultBox.className = 'import-result success';
+            resultBox.classList.remove('hidden');
+            resultBox.textContent = `取得完了：${msg.total} 銘柄 / ${msg.totalInserted?.toLocaleString() ?? 0} 行追加` +
+              (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
+            loadAdminStats();
+          } else if (msg.type === 'error') {
+            resultBox.className = 'import-result error';
+            resultBox.classList.remove('hidden');
+            resultBox.textContent = msg.message;
+          }
+        }
+      }
+    } catch (err) {
+      resultBox.className = 'import-result error';
+      resultBox.classList.remove('hidden');
+      resultBox.textContent = 'エラー: ' + err.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '取得開始';
+    }
+  });
+
+  // J-Quants デフォルト期間（過去1年）
+  (function() {
+    const to = new Date();
+    const from = new Date();
+    from.setFullYear(from.getFullYear() - 1);
+    const fmt = d => d.toISOString().slice(0, 10);
+    document.getElementById('jqPeriod1').value = fmt(from);
+    document.getElementById('jqPeriod2').value = fmt(to);
+  })();
+
   document.getElementById('yahooDownloadBtn').addEventListener('click', async () => {
     const raw = document.getElementById('yahooSymbols').value;
     const symbols = raw.split(/[\s,、，]+/).map(s => s.trim().toUpperCase()).filter(Boolean);

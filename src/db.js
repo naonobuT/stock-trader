@@ -155,6 +155,15 @@ function refreshSymbolStats(newSymbols = null) {
 
 // スキーママイグレーション群
 function migrateSchema() {
+  // settings テーブルを追加（APIキーなどの永続設定用）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
   // trades テーブルに realized_pnl カラムを追加
   const tradeCols = db.pragma('table_info(trades)');
   if (!tradeCols.find(c => c.name === 'realized_pnl')) {
