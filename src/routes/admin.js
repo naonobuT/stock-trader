@@ -5,7 +5,6 @@ const fs = require('fs');
 const { getDb, refreshSymbolStats } = require('../db');
 const { importFromDir, importFromBuffers, getFormats } = require('../importCsv');
 const { getSymbolEntry, reloadSymbols } = require('../symbolNames');
-const { downloadSymbols, downloadUpdate, downloadMissing } = require('../yahooDownload');
 const jquants = require('../jquantsDownload');
 const { saveApiKeyAndTest, getAuthStatus } = require('../jquantsAuth');
 
@@ -113,92 +112,6 @@ router.post('/import-dir', (req, res) => {
       invalidateCache();
     }
     send({ type: 'done', ...result });
-  }
-  res.end();
-});
-
-// Yahoo Finance ダウンロード（SSEで進捗配信）
-router.post('/yahoo-download', async (req, res) => {
-  const { symbols, period1, period2 } = req.body;
-  if (!symbols || !symbols.length) return res.status(400).json({ error: '銘柄コードが指定されていません' });
-  if (!period1 || !period2)        return res.status(400).json({ error: '取得期間を指定してください' });
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-  try {
-    const result = await downloadSymbols(symbols, period1, period2, ({ done, total, symbol }) => {
-      send({ type: 'progress', done, total, symbol });
-    });
-    if (result.totalInserted > 0) {
-      refreshSymbolStats();
-      invalidateCache();
-    }
-    send({ type: 'done', ...result });
-  } catch (err) {
-    send({ type: 'error', message: err.message });
-  }
-  res.end();
-});
-
-// 既存銘柄の差分更新
-router.post('/yahoo-update', async (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-  let aborted = false;
-  res.on('close', () => { aborted = true; });
-
-  try {
-    const result = await downloadUpdate(
-      ({ done, total, symbol }) => send({ type: 'progress', done, total, symbol }),
-      () => aborted
-    );
-    if (!aborted) {
-      if (result.totalInserted > 0) {
-        refreshSymbolStats();
-        invalidateCache();
-      }
-      send({ type: 'done', ...result });
-    }
-  } catch (err) {
-    send({ type: 'error', message: err.message });
-  }
-  res.end();
-});
-
-// 未取込銘柄の一括取得
-router.post('/yahoo-fill', async (req, res) => {
-  const from = '1980-01-01'; // Yahoo Financeが持つ最古のデータから取得
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-  let aborted = false;
-  res.on('close', () => { aborted = true; });
-
-  try {
-    const result = await downloadMissing(
-      from,
-      ({ done, total, symbol }) => send({ type: 'progress', done, total, symbol }),
-      () => aborted
-    );
-    if (!aborted) {
-      if (result.totalInserted > 0) {
-        refreshSymbolStats();
-        invalidateCache();
-      }
-      send({ type: 'done', ...result });
-    }
-  } catch (err) {
-    send({ type: 'error', message: err.message });
   }
   res.end();
 });
