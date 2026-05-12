@@ -273,6 +273,10 @@ function showStartModal() {
     e.preventDefault();
     document.getElementById('startModal').classList.add('hidden');
     switchView('settings');
+    document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+    document.querySelector('.settings-tab[data-tab="data"]').classList.add('active');
+    document.getElementById('tabData').classList.remove('hidden');
   }, { once: true });
 }
 
@@ -2249,6 +2253,18 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     }
   });
 
+  function formatEta(remainingMs) {
+    if (remainingMs <= 0) return '';
+    const s = Math.ceil(remainingMs / 1000);
+    if (s < 60) return `残り約${s}秒`;
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    if (m < 60) return `残り約${m}分${sec > 0 ? sec + '秒' : ''}`;
+    const h = Math.floor(m / 60);
+    const min = m % 60;
+    return `残り約${h}時間${min > 0 ? min + '分' : ''}`;
+  }
+
   function startJqAutoDownload(endpoint, body) {
     const updateBtn   = document.getElementById('jqUpdateBtn');
     const fillBtn     = document.getElementById('jqFillBtn');
@@ -2268,6 +2284,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     let abortController = new AbortController();
     stopBtn.onclick = () => abortController.abort();
 
+    const autoStartTime = Date.now();
     fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), signal: abortController.signal })
       .then(async response => {
         const reader = response.body.getReader();
@@ -2284,7 +2301,13 @@ document.querySelectorAll('.view-tab').forEach(tab => {
             if (msg.type === 'progress') {
               const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
               progressBar.style.width = pct + '%';
-              progressText.textContent = `${msg.done} / ${msg.total} 日付取得中${msg.symbol ? ` (${msg.symbol})` : ''}`;
+              let etaStr = '';
+              if (msg.done > 0 && msg.total > 0) {
+                const elapsed = Date.now() - autoStartTime;
+                const remaining = (msg.total - msg.done) * (elapsed / msg.done);
+                etaStr = ' — ' + formatEta(remaining);
+              }
+              progressText.textContent = `${msg.done} / ${msg.total} 日付取得中${msg.symbol ? ` (${msg.symbol})` : ''}${etaStr}`;
             } else if (msg.type === 'done') {
               progressBar.style.width = '100%';
               progressText.textContent = '完了';
@@ -2326,6 +2349,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     progressBar.style.width = '0%';
     progressText.textContent = '準備中...';
 
+    const dlStartTime = Date.now();
     try {
       const response = await fetch('/api/admin/jquants/download', {
         method: 'POST',
@@ -2346,7 +2370,13 @@ document.querySelectorAll('.view-tab').forEach(tab => {
           if (msg.type === 'progress') {
             const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
             progressBar.style.width = pct + '%';
-            progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}`;
+            let etaStr = '';
+            if (msg.done > 0 && msg.total > 0) {
+              const elapsed = Date.now() - dlStartTime;
+              const remaining = (msg.total - msg.done) * (elapsed / msg.done);
+              etaStr = ' — ' + formatEta(remaining);
+            }
+            progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}${etaStr}`;
           } else if (msg.type === 'done') {
             progressBar.style.width = '100%';
             progressText.textContent = '完了';

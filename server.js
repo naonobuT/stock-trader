@@ -4,7 +4,6 @@ const path = require('path');
 const dbModule = require('./src/db');
 const { getDb, initSymbolStats } = dbModule;
 console.log('[server] Loaded db module:', Object.keys(dbModule));
-const { importAll } = require('./src/importCsv');
 const stockRoutes = require('./src/routes/stocks');
 const adminRoutes = require('./src/routes/admin');
 
@@ -29,9 +28,6 @@ app.get('/admin', (req, res) => {
 (async () => {
   getDb();
   console.log('[server] DB initialized.');
-
-  console.log('[server] Importing CSV data (first run may take a while)...');
-  importAll();
 
   console.log('[server] Initializing symbol stats cache...');
   initSymbolStats();
