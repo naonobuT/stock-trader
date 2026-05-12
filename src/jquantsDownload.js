@@ -1,5 +1,5 @@
 const { getDb } = require('./db');
-const { jquantsFetch, BASE_URL } = require('./jquantsAuth');
+const { jquantsFetch, BASE_URL, checkApiKey } = require('./jquantsAuth');
 
 const CONCURRENCY  = 3;    // 銘柄別取得の同時数
 
@@ -132,6 +132,7 @@ async function downloadSymbol(symbol, period1, period2) {
  * downloadMissing / downloadUpdate で使用
  */
 async function downloadByDateRange(period1, period2, onProgress, shouldAbort, plan) {
+  checkApiKey();
   const db      = getDb();
   const end     = new Date(period2 || toDateStr(new Date()));
   const start   = new Date(period1);
@@ -215,6 +216,7 @@ async function runBatch(symbols, worker, onProgress, shouldAbort) {
  * 複数銘柄を並列ダウンロード（個別指定用）
  */
 async function downloadSymbols(symbols, period1, period2, onProgress) {
+  checkApiKey();
   return runBatch(
     symbols.map(s => s.toUpperCase()),
     sym => downloadSymbol(sym, period1, period2),
