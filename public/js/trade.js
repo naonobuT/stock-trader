@@ -247,8 +247,18 @@ function resetTradeHistory() {
   guest.shortPos = {};
   guest.pendingOrders = [];
   guest.pnl = [{ date: guest.current_date || new Date().toISOString().slice(0, 10), value: INITIAL_CASH }];
+  for (const sim of Object.values(compSims)) {
+    sim.cash = INITIAL_CASH;
+    sim.longPos = {};
+    sim.shortPos = {};
+    sim.cumulativeRealizedPnl = 0;
+    sim.cumulativeHoldDays = 0;
+    sim.openDates = {};
+    sim.pnlData = [];
+  }
   refreshState();
   renderPnl();
+  renderComparisonChart();
 }
 
 // --- Init ---
@@ -1521,8 +1531,9 @@ function renderComparisonChart() {
   // リスク管理（実際）の累積保有日数 vs 累積実現損益
   const riskData = buildHoldDaysData(guest.trades);
 
-  // 3系列の holdDays を合わせて x 軸を構築
+  // 3系列の holdDays を合わせて x 軸を構築（常に0を起点とする）
   const allHoldDays = new Set([
+    0,
     ...riskData.map(d => d.holdDays),
     ...compSims.percent.pnlData.map(d => d.holdDays),
     ...compSims.shares.pnlData.map(d => d.holdDays),
@@ -1538,10 +1549,10 @@ function renderComparisonChart() {
     return keys.map(k => { if (k in map) last = map[k]; return last; });
   };
 
-  const labels        = sortedHoldDays.length ? sortedHoldDays.map(d => `${d}日`) : [''];
-  const riskValues    = sortedHoldDays.length ? fillValues(riskMap, sortedHoldDays) : [0];
-  const percentValues = sortedHoldDays.length ? fillValues(pctMap,  sortedHoldDays) : [0];
-  const sharesValues  = sortedHoldDays.length ? fillValues(shaMap,  sortedHoldDays) : [0];
+  const labels        = sortedHoldDays.map(d => `${d}日`);
+  const riskValues    = fillValues(riskMap, sortedHoldDays);
+  const percentValues = fillValues(pctMap,  sortedHoldDays);
+  const sharesValues  = fillValues(shaMap,  sortedHoldDays);
 
   const pctLabel = `所持金${parseFloat(document.getElementById('percentInput').value)||50}%（仮想）`;
   const shaLabel = `${parseInt(document.getElementById('sharesInput').value)||100}株固定（仮想）`;
