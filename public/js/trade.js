@@ -221,17 +221,50 @@ function applyChartColors() {
 const fmt = n => Math.round(n).toLocaleString('ja-JP');
 const fmtPct = n => (n >= 0 ? '+' : '') + parseFloat(n).toFixed(1) + '%';
 
+// --- Persistence ---
+function saveState() {
+  try {
+    localStorage.setItem('traderPersist', JSON.stringify({ cash: guest.cash, trades: guest.trades }));
+  } catch {}
+}
+
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('traderPersist'));
+    if (saved && typeof saved.cash === 'number' && Array.isArray(saved.trades)) {
+      guest.cash = saved.cash;
+      guest.trades = saved.trades;
+    }
+  } catch {}
+}
+
+function resetTradeHistory() {
+  if (!confirm('トレード結果をすべてリセットします。資金を1,000万円に戻し、損益グラフをクリアします。よろしいですか？')) return;
+  localStorage.removeItem('traderPersist');
+  guest.cash = INITIAL_CASH;
+  guest.trades = [];
+  guest.longPos = {};
+  guest.shortPos = {};
+  guest.pendingOrders = [];
+  guest.pnl = [{ date: guest.current_date || new Date().toISOString().slice(0, 10), value: INITIAL_CASH }];
+  refreshState();
+  renderPnl();
+}
+
 // --- Init ---
 async function init() {
   loadChartColors();
   loadIndicatorSettings();
   loadKeyboardShortcuts();
   loadDefaultBars();
+  loadState();
   setupEvents();
 
   try { setupChart(); } catch (e) { console.error('Chart init failed:', e); }
   applyChartColors();
   setupChartResizer();
+
+  if (guest.trades.length > 0) renderPnl();
 
   _startPrefetch();
   showStartModal();
@@ -390,12 +423,10 @@ async function applyNewStock(symbol, errEl, prefetchedCandles = null, symbolName
   guest.current_idx = startIdx;
   guest.elapsed = 0;
   guest.symbol = symbol;
-  guest.cash = INITIAL_CASH;
   guest.longPos = {};
   guest.shortPos = {};
-  guest.trades = [];
   guest.pendingOrders = [];
-  guest.pnl = [{ date: guest.start_date, value: INITIAL_CASH }];
+  guest.pnl = [{ date: guest.start_date, value: guest.cash }];
   for (const sim of Object.values(compSims)) {
     sim.cash = INITIAL_CASH;
     sim.longPos = {};
@@ -653,6 +684,7 @@ async function nextDay() {
   refreshState();
   renderPnl();
   if (getOrderMode() === 'risk') renderComparisonChart();
+  saveState();
 }
 
 // --- Chart ---
@@ -1307,8 +1339,9 @@ function renderPnl() {
 }
 
 function renderPnlData(data) {
-  const labels = data.length ? data.map(d => `${d.holdDays}日`) : [''];
-  const values = data.length ? data.map(d => d.value) : [0];
+  const withOrigin = [{ holdDays: 0, value: 0 }, ...data];
+  const labels = withOrigin.map(d => `${d.holdDays}日`);
+  const values = withOrigin.map(d => d.value);
   pnlFinalValue = values[values.length - 1] ?? 0;
   const lineColor = pnlFinalValue >= 0 ? '#10b981' : '#ef4444';
 
@@ -1758,6 +1791,7 @@ function setupEvents() {
   document.getElementById('startGameBtn').addEventListener('click', startGame);
   document.getElementById('newGameBtn').addEventListener('click', changeStock);
   document.getElementById('nextDayBtn').addEventListener('click', nextDay);
+  document.getElementById('resetTradeBtn').addEventListener('click', resetTradeHistory);
   document.getElementById('autoAdvanceBtn').addEventListener('click', toggleAutoAdvance);
 
   document.getElementById('blindModeBtn').addEventListener('click', () => {
