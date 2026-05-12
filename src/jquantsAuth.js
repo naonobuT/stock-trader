@@ -56,4 +56,10 @@ function getAuthStatus() {
   };
 }
 
-module.exports = { jquantsFetch, saveApiKeyAndTest, getAuthStatus, BASE_URL };
+function checkApiKey() {
+  const key = getApiKey();
+  if (!key) throw new Error('J-QuantsのAPIキーが設定されていません（設定 > データ管理からAPIキーを保存してください）');
+  return key;
+}
+
+module.exports = { jquantsFetch, saveApiKeyAndTest, getAuthStatus, BASE_URL, checkApiKey };
