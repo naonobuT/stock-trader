@@ -942,3 +942,122 @@ header {
   max-height: calc(100vh - 200px);
   flex: 1;
 }
+
+/* ===== 分析タブ ===== */
+.analysis-wrap {
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.analysis-stats-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ana-stat {
+  flex: 1;
+  min-width: 90px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.ana-stat-val {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--text);
+}
+.ana-stat-lbl {
+  font-size: 10px;
+  color: var(--text2);
+}
+.ana-insight {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+}
+.analysis-charts-row {
+  display: flex;
+  gap: 10px;
+}
+.analysis-chart-box {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  min-width: 0;
+}
+.analysis-chart-title {
+  font-size: 11px;
+  color: var(--text2);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.ana-chart-insight {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 5px;
+  font-style: italic;
+  line-height: 1.5;
+  min-height: 14px;
+}
+.analysis-section {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+.analysis-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.trade-table-wrap {
+  overflow-x: auto;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.trade-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg3);
+  color: var(--text2);
+  padding: 4px 8px;
+  text-align: right;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.trade-table th:first-child,
+.trade-table td:first-child { text-align: left; }
+.trade-table th:nth-child(2),
+.trade-table td:nth-child(2) { text-align: center; }
+.trade-table td {
+  padding: 3px 8px;
+  color: var(--text);
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+.trade-table tr:hover td { background: var(--bg3); }
+.trade-table .pnl-pos { color: var(--up); }
+.trade-table .pnl-neg { color: var(--down); }

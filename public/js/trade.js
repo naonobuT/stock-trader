@@ -2038,10 +2038,12 @@ function switchView(view) {
   document.getElementById('candleView').style.display      = view === 'candle'     ? '' : 'none';
   document.getElementById('pnlView').style.display         = view === 'pnl'        ? '' : 'none';
   document.getElementById('comparisonView').style.display  = view === 'comparison' ? '' : 'none';
+  document.getElementById('analysisView').style.display    = view === 'analysis'   ? '' : 'none';
   document.getElementById('settingsView').style.display    = view === 'settings'   ? '' : 'none';
   if (view === 'pnl' && pnlChartLarge) pnlChartLarge.resize();
   if (view === 'comparison' && comparisonChartLarge) comparisonChartLarge.resize();
   if (view === 'settings' && typeof syncSettingsInputs === 'function') syncSettingsInputs();
+  if (view === 'analysis') renderAnalysis();
 }
 
 document.querySelectorAll('.view-tab').forEach(tab => {
@@ -2515,3 +2517,237 @@ document.querySelectorAll('.view-tab').forEach(tab => {
   })();
 
 })();
+
+// ===== 分析タブ =====
+let holdPnlChartInst = null;
+let maeMfeChartInst  = null;
+
+/** buy→sell / short→cover をペアリング（現在の銘柄のみ） */
+function buildTradePairs() {
+  const sym = currentSymbol?.replace(/\.T$/, '') || '';
+  const symTrades = guest.trades.filter(t =>
+    !t.symbol || t.symbol.replace(/\.T$/, '') === sym
+  );
+  const pairs = [];
+  const longStack  = [];
+  const shortStack = [];
+  for (const t of symTrades) {
+    if (t.type === 'buy') {
+      longStack.push({ ...t });
+    } else if (t.type === 'sell' && t.realizedPnl !== undefined) {
+      const entry = longStack.pop();
+      if (entry) pairs.push({ kind: 'long',  entryDate: entry.date, exitDate: t.date, entryPrice: entry.price, exitPrice: t.price, shares: t.shares, realizedPnl: t.realizedPnl });
+    } else if (t.type === 'short') {
+      shortStack.push({ ...t });
+    } else if (t.type === 'cover' && t.realizedPnl !== undefined) {
+      const entry = shortStack.pop();
+      if (entry) pairs.push({ kind: 'short', entryDate: entry.date, exitDate: t.date, entryPrice: entry.price, exitPrice: t.price, shares: t.shares, realizedPnl: t.realizedPnl });
+    }
+  }
+  return pairs.sort((a, b) => a.exitDate < b.exitDate ? -1 : a.exitDate > b.exitDate ? 1 : 0);
+}
+
+/** エントリー〜決済間の保有日数（取引日ベース） */
+function calcHoldDays(entryDate, exitDate) {
+  if (!guest.all_dates) return 0;
+  const entry = guest.all_dates.findIndex(d => d.date >= entryDate);
+  const exit  = guest.all_dates.findIndex(d => d.date >= exitDate);
+  if (entry < 0 || exit < 0) return 0;
+  return Math.max(0, exit - entry);
+}
+
+/** MAE（最大逆行幅%）/ MFE（最大順行幅%）を計算 */
+function calcMAEMFE(pair) {
+  if (!guest.all_dates) return { mae: 0, mfe: 0 };
+  const bars = guest.all_dates.filter(d => d.date >= pair.entryDate && d.date <= pair.exitDate);
+  if (!bars.length) return { mae: 0, mfe: 0 };
+  const ep = pair.entryPrice;
+  if (pair.kind === 'long') {
+    const maxH = Math.max(...bars.map(b => b.high ?? b.close));
+    const minL = Math.min(...bars.map(b => b.low  ?? b.close));
+    return { mfe: (maxH - ep) / ep * 100, mae: (minL - ep) / ep * 100 };
+  } else {
+    const maxH = Math.max(...bars.map(b => b.high ?? b.close));
+    const minL = Math.min(...bars.map(b => b.low  ?? b.close));
+    return { mfe: (ep - minL) / ep * 100, mae: (ep - maxH) / ep * 100 };
+  }
+}
+
+/** pnl配列から最大ドローダウン% */
+function calcMaxDrawdown() {
+  if (!guest.pnl || guest.pnl.length < 2) return 0;
+  let peak = guest.pnl[0].value, maxDD = 0;
+  for (const p of guest.pnl) {
+    if (p.value > peak) peak = p.value;
+    const dd = (peak - p.value) / peak * 100;
+    if (dd > maxDD) maxDD = dd;
+  }
+  return maxDD;
+}
+
+/** 統計サマリー表示 */
+function renderAnalysisStats(pairs) {
+  const closed = pairs.filter(p => p.realizedPnl !== undefined);
+  const wins   = closed.filter(p => p.realizedPnl > 0);
+  const losses = closed.filter(p => p.realizedPnl <= 0);
+  const winRate  = closed.length ? wins.length / closed.length * 100 : null;
+  const totalPnl = closed.reduce((s, p) => s + p.realizedPnl, 0);
+  const avgWin   = wins.length   ? wins.reduce((s, p) => s + p.realizedPnl, 0) / wins.length   : null;
+  const avgLoss  = losses.length ? losses.reduce((s, p) => s + p.realizedPnl, 0) / losses.length : null;
+  const avgHold  = closed.length ? closed.reduce((s, p) => s + calcHoldDays(p.entryDate, p.exitDate), 0) / closed.length : null;
+  const maxDD    = calcMaxDrawdown();
+
+  const set = (id, text, color) => { const el = document.getElementById(id); el.textContent = text; if (color) el.style.color = color; };
+  set('anaWinRate',  winRate  != null ? `${winRate.toFixed(0)}%`                             : '-', winRate != null ? (winRate >= 50 ? 'var(--up)' : 'var(--down)') : '');
+  set('anaTotalPnl', closed.length   ? `${totalPnl >= 0 ? '+' : ''}${fmt(totalPnl)}円`      : '-', totalPnl >= 0 ? 'var(--up)' : 'var(--down)');
+  set('anaAvgWin',   avgWin  != null ? `+${fmt(avgWin)}円`                                  : '-', 'var(--up)');
+  set('anaAvgLoss',  avgLoss != null ? `${fmt(avgLoss)}円`                                  : '-', 'var(--down)');
+  set('anaAvgHold',  avgHold != null ? `${avgHold.toFixed(1)}日`                            : '-', '');
+  set('anaMaxDD',    maxDD           ? `-${maxDD.toFixed(1)}%`                              : '-', maxDD > 0 ? 'var(--down)' : '');
+
+  const msgs = [];
+  if (closed.length < 2) { msgs.push('2件以上の決済トレードが揃うと詳細な分析が表示されます。'); }
+  else {
+    if (avgWin && avgLoss && Math.abs(avgLoss) > avgWin * 1.5)
+      msgs.push(`平均損失（${fmt(Math.abs(avgLoss))}円）が平均利益（${fmt(avgWin)}円）の${(Math.abs(avgLoss)/avgWin).toFixed(1)}倍です。損切りが遅い可能性があります。`);
+    if (maxDD > 20)
+      msgs.push(`最大ドローダウン${maxDD.toFixed(1)}%は大きく、資金管理の見直しが必要かもしれません。`);
+    if (winRate != null && winRate < 40)
+      msgs.push(`勝率${winRate.toFixed(0)}%は低めです。エントリータイミングの精度向上が課題です。`);
+    if (!msgs.length)
+      msgs.push(`勝率${winRate.toFixed(0)}%・${closed.length}件のトレードを分析中です。`);
+  }
+  document.getElementById('anaInsight').textContent = msgs.join(' ');
+}
+
+/** 保有日数 vs 実現損益 散布図 */
+function renderHoldPnlScatter(pairs) {
+  const closed = pairs.filter(p => p.realizedPnl !== undefined);
+  const toPoint = p => ({ x: calcHoldDays(p.entryDate, p.exitDate), y: +(p.realizedPnl / 10000).toFixed(2), raw: p.realizedPnl });
+  const wins   = closed.filter(p => p.realizedPnl >= 0).map(toPoint);
+  const losses = closed.filter(p => p.realizedPnl <  0).map(toPoint);
+
+  if (holdPnlChartInst) { holdPnlChartInst.destroy(); holdPnlChartInst = null; }
+  holdPnlChartInst = new Chart(document.getElementById('holdPnlChart').getContext('2d'), {
+    type: 'scatter',
+    data: { datasets: [
+      { label: '利益', data: wins,   backgroundColor: 'rgba(34,197,94,0.75)', pointRadius: 6 },
+      { label: '損失', data: losses, backgroundColor: 'rgba(239,68,68,0.75)', pointRadius: 6 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#9ca3af', font: { size: 10 } } },
+        tooltip: { callbacks: { label: ctx => `${ctx.parsed.x}日 / ${ctx.raw.raw >= 0 ? '+' : ''}${fmt(ctx.raw.raw)}円` } },
+      },
+      scales: {
+        x: { title: { display: true, text: '保有日数', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+        y: { title: { display: true, text: '損益（万円）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+      },
+    },
+  });
+  let insight = '';
+  if (losses.length && losses.filter(d => d.x > 5).length / losses.length > 0.5)
+    insight = '損失トレードの多くが長期保有です。「いつか戻るはず」という心理が損失を拡大させている可能性があります。';
+  else if (wins.length && wins.filter(d => d.x <= 3).length / wins.length > 0.6)
+    insight = '利益確定が早い傾向があります。もっと利益を伸ばせる余地があるかもしれません。';
+  document.getElementById('holdPnlInsight').textContent = insight;
+}
+
+/** MAE vs MFE 散布図 */
+function renderMAEMFEChart(pairs) {
+  const closed = pairs.filter(p => p.realizedPnl !== undefined);
+  const points = closed.map(p => { const { mae, mfe } = calcMAEMFE(p); return { x: +mae.toFixed(2), y: +mfe.toFixed(2), pnl: p.realizedPnl }; });
+  const wins   = points.filter(d => d.pnl >= 0);
+  const losses = points.filter(d => d.pnl <  0);
+
+  if (maeMfeChartInst) { maeMfeChartInst.destroy(); maeMfeChartInst = null; }
+  maeMfeChartInst = new Chart(document.getElementById('maeMfeChart').getContext('2d'), {
+    type: 'scatter',
+    data: { datasets: [
+      { label: '利益', data: wins,   backgroundColor: 'rgba(34,197,94,0.75)', pointRadius: 6 },
+      { label: '損失', data: losses, backgroundColor: 'rgba(239,68,68,0.75)', pointRadius: 6 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#9ca3af', font: { size: 10 } } },
+        tooltip: { callbacks: { label: ctx => `MAE:${ctx.parsed.x.toFixed(1)}% / MFE:${ctx.parsed.y.toFixed(1)}%` } },
+      },
+      scales: {
+        x: { title: { display: true, text: 'MAE 最大逆行%（負=不利）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+        y: { title: { display: true, text: 'MFE 最大順行%（正=有利）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+      },
+    },
+  });
+  let insight = '';
+  if (points.length >= 2) {
+    const avgMAE = points.reduce((s, d) => s + Math.abs(d.x), 0) / points.length;
+    const avgMFE = points.reduce((s, d) => s + d.y,          0) / points.length;
+    if (avgMAE > avgMFE * 1.5)
+      insight = `平均MAE ${avgMAE.toFixed(1)}% に対し平均MFE ${avgMFE.toFixed(1)}% です。大きなリスクを取って小さな利益しか得られていない傾向があります。`;
+  }
+  document.getElementById('maeMfeInsight').textContent = insight;
+}
+
+/** シーケンス分析（リベンジトレード検知） */
+function renderSequenceAnalysis(pairs) {
+  const el     = document.getElementById('sequenceAnalysis');
+  const closed = pairs.filter(p => p.realizedPnl !== undefined);
+  if (closed.length < 2) { el.textContent = '2件以上の決済トレードが必要です。'; return; }
+  let revengeCount = 0, rows = '';
+  for (let i = 0; i < closed.length - 1; i++) {
+    const curr = closed[i], next = closed[i + 1];
+    const lotChg  = (next.shares - curr.shares) / curr.shares * 100;
+    const gap     = calcHoldDays(curr.exitDate, next.entryDate);
+    const revenge = curr.realizedPnl < 0 && (lotChg > 30 || gap <= 1);
+    if (revenge) revengeCount++;
+    const pnlCls = curr.realizedPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const lotCls = lotChg > 30 ? 'pnl-neg' : '';
+    rows += `<tr>
+      <td>${curr.exitDate}</td>
+      <td class="${pnlCls}">${curr.realizedPnl >= 0 ? '+' : ''}${fmt(curr.realizedPnl)}円</td>
+      <td class="${lotCls}">${lotChg >= 0 ? '+' : ''}${lotChg.toFixed(0)}%</td>
+      <td>${gap}日</td>
+      <td>${revenge ? '<span style="color:var(--down)">⚠️ リベンジ疑い</span>' : '<span style="color:var(--text2)">-</span>'}</td>
+    </tr>`;
+  }
+  let html = `<table class="trade-table"><thead><tr><th>決済日</th><th>結果</th><th>次のロット変化</th><th>次エントリーまで</th><th>判定</th></tr></thead><tbody>${rows}</tbody></table>`;
+  if (revengeCount > 0)
+    html += `<div class="ana-insight" style="margin-top:8px">⚠️ ${revengeCount}件のリベンジトレードの疑いがあります。負け後のロット増加は感情的な判断かもしれません。</div>`;
+  el.innerHTML = html;
+}
+
+/** トレード履歴テーブル */
+function renderTradeHistoryTable(pairs) {
+  const tbody  = document.getElementById('tradeHistoryBody');
+  const closed = pairs.filter(p => p.realizedPnl !== undefined);
+  if (!closed.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text2)">決済済みトレードなし</td></tr>';
+    return;
+  }
+  tbody.innerHTML = closed.map(p => {
+    const hold   = calcHoldDays(p.entryDate, p.exitDate);
+    const pnlCls = p.realizedPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const kind   = p.kind === 'long' ? '買' : '空売';
+    return `<tr>
+      <td>${p.exitDate}</td>
+      <td style="text-align:center">${kind}</td>
+      <td>${p.shares.toLocaleString()}株</td>
+      <td>${fmt(p.entryPrice)}円</td>
+      <td>${fmt(p.exitPrice)}円</td>
+      <td>${hold}日</td>
+      <td class="${pnlCls}">${p.realizedPnl >= 0 ? '+' : ''}${fmt(p.realizedPnl)}円</td>
+    </tr>`;
+  }).join('');
+}
+
+/** 分析タブ全体レンダリング */
+function renderAnalysis() {
+  const pairs = buildTradePairs();
+  renderAnalysisStats(pairs);
+  renderHoldPnlScatter(pairs);
+  renderMAEMFEChart(pairs);
+  renderSequenceAnalysis(pairs);
+  renderTradeHistoryTable(pairs);
+}
