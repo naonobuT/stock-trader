@@ -1208,7 +1208,7 @@ function setTradeMarkers() {
   if (!tradeMarkersPlugin || !currentSymbol) return;
   const toMarker = t => {
     const m = TRADE_MARKER[t.type] || TRADE_MARKER.buy;
-    return { time: t.date, position: m.position, color: m.color, shape: m.shape, text: `${m.label} ${t.shares}株` };
+    return { time: t.date, position: m.position, color: m.color, shape: m.shape, text: `${m.label} ${t.shares}株@${fmt(t.price)}円` };
   };
   const sym = currentSymbol.replace(/\.T$/, '');
   const filtered = guest.trades
