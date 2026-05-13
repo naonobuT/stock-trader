@@ -53,6 +53,7 @@
     <section class="chart-section">
       <div class="view-tabs">
         <button class="view-tab active" data-view="candle">チャート</button>
+        <button class="view-tab" data-view="analysis">分析</button>
         <button class="view-tab" data-view="pnl">損益グラフ</button>
         <button class="view-tab" id="compViewTab" data-view="comparison" style="display:none">売買方法比較</button>
         <button class="view-tab" data-view="settings">設定</button>
@@ -80,6 +81,50 @@
           <span class="range-label" id="rangeLabel">-</span>
           <input type="range" id="rangeSlider" min="10" max="500" value="200" step="1">
           <span class="range-hint">← 広げる / 縮める →</span>
+        </div>
+      </div>
+
+      <!-- 分析タブ -->
+      <div id="analysisView" class="view-panel" style="display:none">
+        <div class="analysis-wrap">
+          <!-- 統計サマリー -->
+          <div class="analysis-stats-row">
+            <div class="ana-stat"><span class="ana-stat-val" id="anaWinRate">-</span><span class="ana-stat-lbl">勝率</span></div>
+            <div class="ana-stat"><span class="ana-stat-val" id="anaTotalPnl">-</span><span class="ana-stat-lbl">総損益</span></div>
+            <div class="ana-stat"><span class="ana-stat-val" id="anaAvgWin">-</span><span class="ana-stat-lbl">平均利益</span></div>
+            <div class="ana-stat"><span class="ana-stat-val" id="anaAvgLoss">-</span><span class="ana-stat-lbl">平均損失</span></div>
+            <div class="ana-stat"><span class="ana-stat-val" id="anaAvgHold">-</span><span class="ana-stat-lbl">平均保有日数</span></div>
+            <div class="ana-stat"><span class="ana-stat-val" id="anaMaxDD">-</span><span class="ana-stat-lbl">最大DD%</span></div>
+          </div>
+          <div id="anaInsight" class="ana-insight"></div>
+          <!-- 散布図 2列 -->
+          <div class="analysis-charts-row">
+            <div class="analysis-chart-box">
+              <div class="analysis-chart-title">📊 保有日数 vs 実現損益（プロスペクト理論）</div>
+              <canvas id="holdPnlChart" height="200"></canvas>
+              <div id="holdPnlInsight" class="ana-chart-insight"></div>
+            </div>
+            <div class="analysis-chart-box">
+              <div class="analysis-chart-title">🌊 MAE vs MFE（含み損/益の非対称性）</div>
+              <canvas id="maeMfeChart" height="200"></canvas>
+              <div id="maeMfeInsight" class="ana-chart-insight"></div>
+            </div>
+          </div>
+          <!-- シーケンス分析 -->
+          <div class="analysis-section">
+            <div class="analysis-section-title">🎲 シーケンス分析（リベンジトレード検知）</div>
+            <div id="sequenceAnalysis"></div>
+          </div>
+          <!-- トレード履歴 -->
+          <div class="analysis-section">
+            <div class="analysis-section-title">📋 トレード履歴</div>
+            <div class="trade-table-wrap">
+              <table class="trade-table">
+                <thead><tr><th>決済日</th><th>種類</th><th>株数</th><th>エントリー</th><th>決済</th><th>保有日数</th><th>損益</th></tr></thead>
+                <tbody id="tradeHistoryBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
