@@ -3,6 +3,7 @@ let currentSymbol = null;
 let gameActive = false;
 let ma1 = 25, ma2 = 75, ma3 = 200;
 let lwChart = null, candleSeries = null, ma1Series = null, ma2Series = null, ma3Series = null;
+let tradeMarkersPlugin = null;
 let volChart = null, volSeries = null;
 let pnlChart = null, pnlChartLarge = null;
 let comparisonChart = null, comparisonChartLarge = null;
@@ -790,6 +791,7 @@ function setupChart() {
     wickUpColor: chartColors.upCandle, wickDownColor: chartColors.downCandle,
     priceLineVisible: false, lastValueVisible: false,
   });
+  tradeMarkersPlugin = LightweightCharts.createSeriesMarkers(candleSeries, []);
 
   ma1Series = lwChart.addSeries(LightweightCharts.LineSeries, { color: chartColors.ma1, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   ma2Series = lwChart.addSeries(LightweightCharts.LineSeries, { color: chartColors.ma2, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
@@ -1203,7 +1205,7 @@ const TRADE_MARKER = {
 };
 
 function setTradeMarkers() {
-  if (!candleSeries || !currentSymbol) return;
+  if (!tradeMarkersPlugin || !currentSymbol) return;
   const toMarker = t => {
     const m = TRADE_MARKER[t.type] || TRADE_MARKER.buy;
     return { time: t.date, position: m.position, color: m.color, shape: m.shape, text: `${m.label} ${t.shares}株` };
@@ -1212,7 +1214,7 @@ function setTradeMarkers() {
   const filtered = guest.trades
     .filter(t => !t.symbol || t.symbol.replace(/\.T$/, '') === sym)
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-  try { candleSeries.setMarkers(filtered.map(toMarker)); } catch (e) { console.warn('[markers]', e.message); }
+  try { tradeMarkersPlugin.setMarkers(filtered.map(toMarker)); } catch (e) { console.warn('[markers]', e.message); }
 }
 
 function updateOrderTabs(hasLong, hasShort, longShares = 0, shortShares = 0) {
