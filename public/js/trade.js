@@ -528,7 +528,7 @@ async function nextDay() {
       if (pos.shares > 0) {
         const realizedPnl = (closePrice - pos.avg_price) * pos.shares;
         guest.cash += closePrice * pos.shares;
-        guest.trades.push({ date: closeDate, type: 'sell', shares: pos.shares, price: closePrice, realizedPnl });
+        guest.trades.push({ date: closeDate, type: 'sell', shares: pos.shares, price: closePrice, realizedPnl, symbol: sym });
         for (const sim of Object.values(compSims)) simExecuteOrder(sim, 'sell', sym, closePrice, 0, closeDate);
         forcedLines.push(`買→強制売却 ${pos.shares}株 @${fmt(closePrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         pos.shares = 0;
@@ -538,7 +538,7 @@ async function nextDay() {
       if (spos.shares > 0) {
         const realizedPnl = (spos.avg_price - closePrice) * spos.shares;
         guest.cash -= closePrice * spos.shares;
-        guest.trades.push({ date: closeDate, type: 'cover', shares: spos.shares, price: closePrice, realizedPnl });
+        guest.trades.push({ date: closeDate, type: 'cover', shares: spos.shares, price: closePrice, realizedPnl, symbol: sym });
         for (const sim of Object.values(compSims)) simExecuteOrder(sim, 'cover', sym, closePrice, 0, closeDate);
         forcedLines.push(`空売→強制買戻 ${spos.shares}株 @${fmt(closePrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         spos.shares = 0;
@@ -578,7 +578,7 @@ async function nextDay() {
         pos.shares = newShares;
         if (order.stopPct) pos.stopLossPrice = pos.avg_price * (1 - order.stopPct / 100);
         guest.longPos[order.symbol] = pos;
-        guest.trades.push({ date: guest.current_date, type: 'buy', shares: order.shares, price: execPrice });
+        guest.trades.push({ date: guest.current_date, type: 'buy', shares: order.shares, price: execPrice, symbol: order.symbol });
       }
     } else if (order.type === 'sell') {
       const pos = guest.longPos[order.symbol];
@@ -587,7 +587,7 @@ async function nextDay() {
         guest.cash += execPrice * order.shares;
         pos.shares -= order.shares;
         if (pos.shares === 0) pos.stopLossPrice = null;
-        guest.trades.push({ date: guest.current_date, type: 'sell', shares: order.shares, price: execPrice, realizedPnl });
+        guest.trades.push({ date: guest.current_date, type: 'sell', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
       }
     } else if (order.type === 'short') {
       guest.cash += execPrice * order.shares;
@@ -597,7 +597,7 @@ async function nextDay() {
       spos.shares = newShort;
       if (order.stopPct) spos.stopLossPrice = spos.avg_price * (1 + order.stopPct / 100);
       guest.shortPos[order.symbol] = spos;
-      guest.trades.push({ date: guest.current_date, type: 'short', shares: order.shares, price: execPrice });
+      guest.trades.push({ date: guest.current_date, type: 'short', shares: order.shares, price: execPrice, symbol: order.symbol });
     } else if (order.type === 'cover') {
       const spos = guest.shortPos[order.symbol];
       if (spos && spos.shares >= order.shares) {
@@ -607,7 +607,7 @@ async function nextDay() {
           guest.cash -= cost;
           spos.shares -= order.shares;
           if (spos.shares === 0) spos.stopLossPrice = null;
-          guest.trades.push({ date: guest.current_date, type: 'cover', shares: order.shares, price: execPrice, realizedPnl });
+          guest.trades.push({ date: guest.current_date, type: 'cover', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
         }
       }
     }
@@ -635,7 +635,7 @@ async function nextDay() {
         const sellPrice = Math.round(pos.stopLossPrice * (1 - slippage / 100));
         const realizedPnl = (sellPrice - pos.avg_price) * pos.shares;
         guest.cash += sellPrice * pos.shares;
-        guest.trades.push({ date: guest.current_date, type: 'sell', shares: pos.shares, price: sellPrice, realizedPnl });
+        guest.trades.push({ date: guest.current_date, type: 'sell', shares: pos.shares, price: sellPrice, realizedPnl, symbol: sym });
         stopMsgs.push(`🔴 損切り自動執行（買）: ${pos.shares}株 @${fmt(sellPrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         pos.shares = 0;
         pos.stopLossPrice = null;
@@ -647,7 +647,7 @@ async function nextDay() {
         const coverPrice = Math.round(spos.stopLossPrice * (1 + slippage / 100));
         const realizedPnl = (spos.avg_price - coverPrice) * spos.shares;
         guest.cash -= coverPrice * spos.shares;
-        guest.trades.push({ date: guest.current_date, type: 'cover', shares: spos.shares, price: coverPrice, realizedPnl });
+        guest.trades.push({ date: guest.current_date, type: 'cover', shares: spos.shares, price: coverPrice, realizedPnl, symbol: sym });
         stopMsgs.push(`🔴 損切り自動執行（空売）: ${spos.shares}株 @${fmt(coverPrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         spos.shares = 0;
         spos.stopLossPrice = null;
@@ -1203,11 +1203,16 @@ const TRADE_MARKER = {
 };
 
 function setTradeMarkers() {
+  if (!candleSeries || !currentSymbol) return;
   const toMarker = t => {
     const m = TRADE_MARKER[t.type] || TRADE_MARKER.buy;
     return { time: t.date, position: m.position, color: m.color, shape: m.shape, text: `${m.label} ${t.shares}株` };
   };
-  try { candleSeries.setMarkers(guest.trades.map(toMarker)); } catch {}
+  const sym = currentSymbol.replace(/\.T$/, '');
+  const filtered = guest.trades
+    .filter(t => !t.symbol || t.symbol.replace(/\.T$/, '') === sym)
+    .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  try { candleSeries.setMarkers(filtered.map(toMarker)); } catch (e) { console.warn('[markers]', e.message); }
 }
 
 function updateOrderTabs(hasLong, hasShort, longShares = 0, shortShares = 0) {
