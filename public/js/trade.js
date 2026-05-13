@@ -2558,18 +2558,20 @@ function calcHoldDays(entryDate, exitDate) {
 
 /** MAE（最大逆行幅%）/ MFE（最大順行幅%）を計算 */
 function calcMAEMFE(pair) {
-  if (!guest.all_dates) return { mae: 0, mfe: 0 };
+  if (!guest.all_dates || !guest.all_dates.length) return { mae: 0, mfe: 0 };
   const bars = guest.all_dates.filter(d => d.date >= pair.entryDate && d.date <= pair.exitDate);
   if (!bars.length) return { mae: 0, mfe: 0 };
   const ep = pair.entryPrice;
+  if (!ep) return { mae: 0, mfe: 0 };
+  const highs = bars.map(b => b.high ?? b.close).filter(v => v != null && isFinite(v));
+  const lows  = bars.map(b => b.low  ?? b.close).filter(v => v != null && isFinite(v));
+  if (!highs.length || !lows.length) return { mae: 0, mfe: 0 };
+  const maxH = Math.max(...highs);
+  const minL = Math.min(...lows);
   if (pair.kind === 'long') {
-    const maxH = Math.max(...bars.map(b => b.high ?? b.close));
-    const minL = Math.min(...bars.map(b => b.low  ?? b.close));
-    return { mfe: (maxH - ep) / ep * 100, mae: (minL - ep) / ep * 100 };
+    return { mfe: +((maxH - ep) / ep * 100).toFixed(2), mae: +((minL - ep) / ep * 100).toFixed(2) };
   } else {
-    const maxH = Math.max(...bars.map(b => b.high ?? b.close));
-    const minL = Math.min(...bars.map(b => b.low  ?? b.close));
-    return { mfe: (ep - minL) / ep * 100, mae: (ep - maxH) / ep * 100 };
+    return { mfe: +((ep - minL) / ep * 100).toFixed(2), mae: +((ep - maxH) / ep * 100).toFixed(2) };
   }
 }
 
@@ -2631,8 +2633,8 @@ function renderHoldPnlScatter(pairs) {
   holdPnlChartInst = new Chart(document.getElementById('holdPnlChart').getContext('2d'), {
     type: 'scatter',
     data: { datasets: [
-      { label: '利益', data: wins,   backgroundColor: 'rgba(34,197,94,0.75)', pointRadius: 6 },
-      { label: '損失', data: losses, backgroundColor: 'rgba(239,68,68,0.75)', pointRadius: 6 },
+      { label: '利益', data: wins,   backgroundColor: 'rgba(34,197,94,0.75)', pointRadius: 7 },
+      { label: '損失', data: losses, backgroundColor: 'rgba(239,68,68,0.75)', pointRadius: 7 },
     ]},
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -2641,8 +2643,8 @@ function renderHoldPnlScatter(pairs) {
         tooltip: { callbacks: { label: ctx => `${ctx.parsed.x}日 / ${ctx.raw.raw >= 0 ? '+' : ''}${fmt(ctx.raw.raw)}円` } },
       },
       scales: {
-        x: { title: { display: true, text: '保有日数', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
-        y: { title: { display: true, text: '損益（万円）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+        x: { min: 0, title: { display: true, text: '保有日数', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+        y: { title: { display: true, text: '損益（万円）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30', drawBorder: false }, border: { dash: [4, 4] } },
       },
     },
   });
@@ -2665,8 +2667,8 @@ function renderMAEMFEChart(pairs) {
   maeMfeChartInst = new Chart(document.getElementById('maeMfeChart').getContext('2d'), {
     type: 'scatter',
     data: { datasets: [
-      { label: '利益', data: wins,   backgroundColor: 'rgba(34,197,94,0.75)', pointRadius: 6 },
-      { label: '損失', data: losses, backgroundColor: 'rgba(239,68,68,0.75)', pointRadius: 6 },
+      { label: '利益', data: wins,   backgroundColor: 'rgba(34,197,94,0.75)', pointRadius: 7 },
+      { label: '損失', data: losses, backgroundColor: 'rgba(239,68,68,0.75)', pointRadius: 7 },
     ]},
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -2675,8 +2677,8 @@ function renderMAEMFEChart(pairs) {
         tooltip: { callbacks: { label: ctx => `MAE:${ctx.parsed.x.toFixed(1)}% / MFE:${ctx.parsed.y.toFixed(1)}%` } },
       },
       scales: {
-        x: { title: { display: true, text: 'MAE 最大逆行%（負=不利）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
-        y: { title: { display: true, text: 'MFE 最大順行%（正=有利）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+        x: { max: 0, title: { display: true, text: 'MAE 最大逆行%（左=大きな逆行）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
+        y: { min: 0, title: { display: true, text: 'MFE 最大順行%（上=大きな利益機会）', color: '#9ca3af', font: { size: 10 } }, ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: '#1e1e30' } },
       },
     },
   });
