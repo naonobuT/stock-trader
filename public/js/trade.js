@@ -3185,6 +3185,8 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
   goalEl.innerHTML = `<div style="font-weight:bold;color:#22c55e;margin-bottom:4px;">次回の目標</div>`
     + goals.map(g => `<div><span style="color:#22c55e;">✓ </span>${g}</div>`).join('');
 
+  el.style.flex = '1';
+  el.style.minWidth = '0';
   rowEl.style.display = 'flex';
   rowEl.style.gap = '12px';
   rowEl.style.alignItems = 'flex-start';
