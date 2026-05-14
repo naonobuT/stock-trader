@@ -34,6 +34,7 @@ let blindMode = false;
 let blindDayCount = 0;
 let blindActualSymbol = '';
 let blindActualDate = '';
+let _blindModeBeforeRound = false; // 3Rモード開始前のブラインド状態を保存
 let pnlFinalValue = 0;
 let autoAdvanceTimer = null;
 let autoAdvanceGen = 0;
@@ -417,6 +418,9 @@ async function startRoundMode() {
   currentRound     = 1;
   currentSessionId = Date.now().toString();
   roundComplete    = false;
+  // 銘柄名・日付を隠すためブラインドモードを強制ON（元の状態を保存）
+  _blindModeBeforeRound = blindMode;
+  if (!blindMode) setBlindMode(true);
   // 現銘柄を使う場合は下記をコメントアウトして changeStock() を呼ぶ
   // 新しいランダム銘柄でスタート
   isChangingStock = true;
@@ -465,6 +469,8 @@ function endRoundMode() {
   // ラウンド比較チャートを破棄（通常モードのチャートで再作成させる）
   if (pnlChart?._roundMode)      { pnlChart.destroy();      pnlChart      = null; }
   if (pnlChartLarge?._roundMode) { pnlChartLarge.destroy(); pnlChartLarge = null; }
+  // ブラインドモードを3Rモード開始前の状態に戻す
+  if (blindMode !== _blindModeBeforeRound) setBlindMode(_blindModeBeforeRound);
   updateRoundUI();
 }
 
@@ -2023,6 +2029,28 @@ async function executeOrder(orderType) {
   await nextDay();
 }
 
+// --- ブラインドモード ---
+function applyBlindChartOptions() {
+  const opts = { crosshair: { vertLine: { labelVisible: !blindMode } } };
+  const tsOpts = { timeScale: { visible: !blindMode } };
+  [lwChart, volChart, rsiChartInst, macdChartInst].forEach(c => {
+    if (c) { c.applyOptions(opts); c.applyOptions(tsOpts); }
+  });
+}
+
+function setBlindMode(on) {
+  blindMode = on;
+  const btn = document.getElementById('blindModeBtn');
+  btn.classList.toggle('blind-active', blindMode);
+  btn.textContent = blindMode ? '👁 公開' : '🙈 ブラインド';
+  document.getElementById('currentSymbol').textContent =
+    blindMode ? '???' : blindActualSymbol;
+  document.getElementById('currentDate').textContent =
+    blindMode ? `${blindDayCount}日目` : blindActualDate;
+  applyBlindChartOptions();
+  updatePortfolio();
+}
+
 // --- Events ---
 function setupEvents() {
   document.getElementById('startGameBtn').addEventListener('click', startGame);
@@ -2045,25 +2073,8 @@ function setupEvents() {
   });
 
   document.getElementById('blindModeBtn').addEventListener('click', () => {
-    blindMode = !blindMode;
-    const btn = document.getElementById('blindModeBtn');
-    btn.classList.toggle('blind-active', blindMode);
-    btn.textContent = blindMode ? '👁 公開' : '🙈 ブラインド';
-    document.getElementById('currentSymbol').textContent =
-      blindMode ? '???' : blindActualSymbol;
-    document.getElementById('currentDate').textContent =
-      blindMode ? `${blindDayCount}日目` : blindActualDate;
-    applyBlindChartOptions();
-    updatePortfolio();
+    setBlindMode(!blindMode);
   });
-
-  function applyBlindChartOptions() {
-    const opts = { crosshair: { vertLine: { labelVisible: !blindMode } } };
-    const tsOpts = { timeScale: { visible: !blindMode } };
-    [lwChart, volChart, rsiChartInst, macdChartInst].forEach(c => {
-      if (c) { c.applyOptions(opts); c.applyOptions(tsOpts); }
-    });
-  }
 
   colorInputIds.forEach((id, i) => {
     const el = document.getElementById(id);
