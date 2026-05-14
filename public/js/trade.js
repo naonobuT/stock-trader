@@ -38,7 +38,6 @@ let pnlFinalValue = 0;
 let autoAdvanceTimer = null;
 let autoAdvanceGen = 0;
 let isChangingStock = false;
-let isNextDayRunning = false;
 let userZoomSet = false;
 
 const indicatorState = {
@@ -602,12 +601,6 @@ function toggleAutoAdvance() {
 // --- Next day ---
 async function nextDay() {
   if (!gameActive) return;
-  if (isNextDayRunning) return;
-  isNextDayRunning = true;
-  try { await _nextDayImpl(); } finally { isNextDayRunning = false; }
-}
-
-async function _nextDayImpl() {
 
   guest.current_idx++;
   if (guest.current_idx >= guest.all_dates.length) {
