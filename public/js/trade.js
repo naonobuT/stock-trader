@@ -1904,9 +1904,16 @@ function setupEvents() {
   document.getElementById('nextDayBtn').addEventListener('click', nextDay);
   document.getElementById('resetTradeBtn').addEventListener('click', resetTradeHistory);
   document.getElementById('autoAdvanceBtn').addEventListener('click', toggleAutoAdvance);
-  document.getElementById('roundModeBtn').addEventListener('click', startRoundMode);
-  document.getElementById('endRoundModeBtn').addEventListener('click', endRoundMode);
-  document.getElementById('nextRoundBtn').addEventListener('click', async () => {
+  document.getElementById('roundModeBtn').addEventListener('click', async (e) => {
+    e.currentTarget.blur();
+    await startRoundMode();
+  });
+  document.getElementById('endRoundModeBtn').addEventListener('click', (e) => {
+    e.currentTarget.blur();
+    endRoundMode();
+  });
+  document.getElementById('nextRoundBtn').addEventListener('click', async (e) => {
+    e.currentTarget.blur();
     if (currentRound >= 3) { switchView('analysis'); }
     else { await nextRound(); }
   });
