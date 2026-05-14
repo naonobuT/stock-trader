@@ -1320,7 +1320,7 @@ function setTradeMarkers() {
   const filtered = guest.trades
     .filter(t =>
       (!t.symbol || t.symbol.replace(/\.T$/, '') === sym) &&
-      (!roundMode || t.round === currentRound)
+      (!roundMode || (t.round === currentRound && t.sessionId === currentSessionId))
     )
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   try { tradeMarkersPlugin.setMarkers(filtered.map(toMarker)); } catch (e) { console.warn('[markers]', e.message); }
@@ -1471,8 +1471,11 @@ function renderPnl() {
 // 3Rモード専用：ラウンドごとの実現損益を3本線で比較表示
 function _renderPnlRound() {
   // ラウンド別データ（各ラウンド独立して 0 スタート）
+  // currentSessionId で現セッションのトレードのみ対象にする
   const roundsData = [1, 2, 3].map(r => {
-    const data = buildHoldDaysData(guest.trades.filter(t => t.round === r));
+    const data = buildHoldDaysData(
+      guest.trades.filter(t => t.round === r && t.sessionId === currentSessionId)
+    );
     return [{ holdDays: 0, value: 0 }, ...data];
   });
 
