@@ -1315,7 +1315,10 @@ function setTradeMarkers() {
   };
   const sym = currentSymbol.replace(/\.T$/, '');
   const filtered = guest.trades
-    .filter(t => !t.symbol || t.symbol.replace(/\.T$/, '') === sym)
+    .filter(t =>
+      (!t.symbol || t.symbol.replace(/\.T$/, '') === sym) &&
+      (!roundMode || t.round === currentRound)
+    )
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   try { tradeMarkersPlugin.setMarkers(filtered.map(toMarker)); } catch (e) { console.warn('[markers]', e.message); }
 }
