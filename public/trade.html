@@ -25,6 +25,12 @@
         <div id="searchDropdown" class="search-dropdown hidden"></div>
       </div>
       <button id="newGameBtn" class="btn-outline-sm">🎲 銘柄変更[N]</button>
+      <button id="roundModeBtn" class="btn-outline-sm" title="同じ銘柄を3回プレイして損切りクセを診断">🎯 3Rモード</button>
+      <div id="roundIndicator" class="round-indicator" style="display:none">
+        Round <span id="roundNumDisplay">1</span>/3
+        <button id="nextRoundBtn" class="btn-round-next" style="display:none">次のラウンドへ →</button>
+        <button id="endRoundModeBtn" class="btn-round-end">×</button>
+      </div>
       <div class="auto-advance-controls">
         <input type="number" id="autoIntervalInput" value="3" min="0.5" step="0.5" class="auto-interval-input">
         <span class="auto-interval-label">秒</span>
@@ -97,6 +103,31 @@
             <div class="ana-stat"><span class="ana-stat-val" id="anaMaxDD">-</span><span class="ana-stat-lbl">最大DD%</span></div>
           </div>
           <div id="anaInsight" class="ana-insight"></div>
+          <!-- スコアカード -->
+          <div class="score-cards-row" id="scoreCardsRow">
+            <div class="score-card">
+              <div class="score-card-header"><span class="score-icon">😰</span><span class="score-name">損切り粘り度</span><span class="score-num" id="scorePrayer">-</span></div>
+              <div class="score-bar-wrap"><div class="score-bar score-bar-bad" id="barPrayer" style="width:0%"></div></div>
+              <div class="score-desc" id="descPrayer">-</div>
+            </div>
+            <div class="score-card">
+              <div class="score-card-header"><span class="score-icon">😱</span><span class="score-name">パニック投げ度</span><span class="score-num" id="scorePanic">-</span></div>
+              <div class="score-bar-wrap"><div class="score-bar score-bar-warn" id="barPanic" style="width:0%"></div></div>
+              <div class="score-desc" id="descPanic">-</div>
+            </div>
+            <div class="score-card">
+              <div class="score-card-header"><span class="score-icon">🎯</span><span class="score-name">一貫性（規律）</span><span class="score-num" id="scoreConsist">-</span></div>
+              <div class="score-bar-wrap"><div class="score-bar score-bar-good" id="barConsist" style="width:0%"></div></div>
+              <div class="score-desc" id="descConsist">-</div>
+            </div>
+          </div>
+          <!-- AI診断 -->
+          <div id="aiAdvice" class="ai-advice-box" style="display:none"></div>
+          <!-- ラウンド比較（3Rモード時） -->
+          <div id="roundCompareSection" style="display:none" class="analysis-section">
+            <div class="analysis-section-title">🎯 3ラウンド比較</div>
+            <div id="roundCompareContent"></div>
+          </div>
           <!-- 散布図 2列 -->
           <div class="analysis-charts-row">
             <div class="analysis-chart-box">
