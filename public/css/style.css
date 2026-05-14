@@ -1068,3 +1068,102 @@ header {
 .trade-table tr:hover td { background: var(--bg3); }
 .trade-table .pnl-pos { color: var(--up); }
 .trade-table .pnl-neg { color: var(--down); }
+
+/* ===== 3ラウンドモード ===== */
+.round-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99,102,241,0.15);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.btn-round-next {
+  padding: 2px 8px;
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+.btn-round-next:hover { opacity: 0.85; }
+.btn-round-end {
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.btn-round-end:hover { color: var(--down); }
+
+/* ===== スコアカード ===== */
+.score-cards-row {
+  display: flex;
+  gap: 8px;
+}
+.score-card {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.score-card-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.score-icon { font-size: 14px; }
+.score-name {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text2);
+  font-weight: 500;
+}
+.score-num {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--text);
+}
+.score-bar-wrap {
+  background: var(--bg3);
+  border-radius: 3px;
+  height: 6px;
+  overflow: hidden;
+}
+.score-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.score-bar-bad  { background: #ef4444; }
+.score-bar-warn { background: #f59e0b; }
+.score-bar-good { background: #22c55e; }
+.score-desc {
+  font-size: 10px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+/* ===== AI診断 ===== */
+.ai-advice-box {
+  background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1));
+  border: 1px solid rgba(99,102,241,0.4);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.7;
+}
+.ai-advice-box strong { color: var(--accent); }

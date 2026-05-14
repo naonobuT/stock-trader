@@ -4,6 +4,21 @@ let gameActive = false;
 let ma1 = 25, ma2 = 75, ma3 = 200;
 let lwChart = null, candleSeries = null, ma1Series = null, ma2Series = null, ma3Series = null;
 let tradeMarkersPlugin = null;
+
+// ===== 3ラウンドモード状態 =====
+let roundMode        = false;
+let currentRound     = 0;
+let currentSessionId = null;
+let roundSessionSymbol  = null;
+let roundSessionStartIdx = null;
+let roundSessionCandles  = null;
+let roundSessionName    = null;
+let roundComplete       = false; // 現ラウンド終了待ち
+
+/** round/sessionId を自動付与してトレードを記録 */
+function tradePush(obj) {
+  tradePush({ ...obj, round: currentRound || 0, sessionId: currentSessionId || null });
+}
 let volChart = null, volSeries = null;
 let pnlChart = null, pnlChartLarge = null;
 let comparisonChart = null, comparisonChartLarge = null;
@@ -395,6 +410,78 @@ async function changeStock() {
   }
 }
 
+// ===== 3ラウンドモード関数 =====
+async function startRoundMode() {
+  if (isChangingStock) return;
+  roundMode        = true;
+  currentRound     = 1;
+  currentSessionId = Date.now().toString();
+  roundComplete    = false;
+  // 現銘柄を使う場合は下記をコメントアウトして changeStock() を呼ぶ
+  // 新しいランダム銘柄でスタート
+  isChangingStock = true;
+  try {
+    const r = await fetch('/api/stocks/random-with-candles');
+    if (!r.ok) { roundMode = false; return; }
+    const { symbol, name, oldName, candles } = await r.json();
+    roundSessionSymbol  = symbol;
+    roundSessionName    = name;
+    roundSessionCandles = candles;
+    guest.cash = INITIAL_CASH;
+    await applyNewStock(symbol, null, candles, name, oldName);
+    roundSessionStartIdx = guest.start_idx;
+  } finally {
+    isChangingStock = false;
+  }
+  updateRoundUI();
+}
+
+async function nextRound() {
+  if (!roundMode || currentRound >= 3) return;
+  currentRound++;
+  roundComplete = false;
+  // 同一銘柄・同一開始インデックスでリプレイ
+  guest.cash = INITIAL_CASH;
+  isChangingStock = true;
+  try {
+    await applyNewStock(roundSessionSymbol, null, roundSessionCandles, roundSessionName, null, roundSessionStartIdx);
+  } finally {
+    isChangingStock = false;
+  }
+  updateRoundUI();
+}
+
+function endRoundMode() {
+  roundMode        = false;
+  currentRound     = 0;
+  currentSessionId = null;
+  roundComplete    = false;
+  roundSessionSymbol  = null;
+  roundSessionStartIdx = null;
+  roundSessionCandles  = null;
+  roundSessionName    = null;
+  updateRoundUI();
+}
+
+function updateRoundUI() {
+  const indicator = document.getElementById('roundIndicator');
+  const nextBtn   = document.getElementById('nextRoundBtn');
+  const modeBtn   = document.getElementById('roundModeBtn');
+  if (roundMode) {
+    indicator.style.display = '';
+    document.getElementById('roundNumDisplay').textContent = currentRound;
+    const isDone = roundComplete && currentRound >= 3;
+    nextBtn.style.display = roundComplete ? '' : 'none';
+    nextBtn.textContent   = isDone ? '📊 分析を見る' : `ラウンド${currentRound + 1}へ →`;
+    modeBtn.style.display = 'none';
+    document.getElementById('newGameBtn').style.display = 'none';
+  } else {
+    indicator.style.display = 'none';
+    modeBtn.style.display   = '';
+    document.getElementById('newGameBtn').style.display = '';
+  }
+}
+
 // Guest local state (in-memory)
 const guest = {
   cash: INITIAL_CASH,
@@ -411,7 +498,7 @@ const guest = {
   current_idx: 0,
 };
 
-async function applyNewStock(symbol, errEl, prefetchedCandles = null, symbolName = null, symbolOldName = null) {
+async function applyNewStock(symbol, errEl, prefetchedCandles = null, symbolName = null, symbolOldName = null, forcedStartIdx = null) {
   const err = (msg) => { if (errEl) { errEl.textContent = msg; errEl.className = 'msg error'; } };
 
   let allData = prefetchedCandles;
@@ -426,7 +513,7 @@ async function applyNewStock(symbol, errEl, prefetchedCandles = null, symbolName
   const minHistory = 200;
   const minRemaining = 100;
   const maxStart = Math.max(minHistory, allData.length - minRemaining - 1);
-  const startIdx = minHistory + Math.floor(Math.random() * Math.max(1, maxStart - minHistory + 1));
+  const startIdx = forcedStartIdx ?? (minHistory + Math.floor(Math.random() * Math.max(1, maxStart - minHistory + 1)));
   guest.all_dates = allData;
   guest.start_idx = startIdx;
   guest.start_date = allData[startIdx].date;
@@ -529,7 +616,7 @@ async function nextDay() {
       if (pos.shares > 0) {
         const realizedPnl = (closePrice - pos.avg_price) * pos.shares;
         guest.cash += closePrice * pos.shares;
-        guest.trades.push({ date: closeDate, type: 'sell', shares: pos.shares, price: closePrice, realizedPnl, symbol: sym });
+        tradePush({ date: closeDate, type: 'sell', shares: pos.shares, price: closePrice, realizedPnl, symbol: sym });
         for (const sim of Object.values(compSims)) simExecuteOrder(sim, 'sell', sym, closePrice, 0, closeDate);
         forcedLines.push(`買→強制売却 ${pos.shares}株 @${fmt(closePrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         pos.shares = 0;
@@ -539,7 +626,7 @@ async function nextDay() {
       if (spos.shares > 0) {
         const realizedPnl = (spos.avg_price - closePrice) * spos.shares;
         guest.cash -= closePrice * spos.shares;
-        guest.trades.push({ date: closeDate, type: 'cover', shares: spos.shares, price: closePrice, realizedPnl, symbol: sym });
+        tradePush({ date: closeDate, type: 'cover', shares: spos.shares, price: closePrice, realizedPnl, symbol: sym });
         for (const sim of Object.values(compSims)) simExecuteOrder(sim, 'cover', sym, closePrice, 0, closeDate);
         forcedLines.push(`空売→強制買戻 ${spos.shares}株 @${fmt(closePrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         spos.shares = 0;
@@ -560,6 +647,12 @@ async function nextDay() {
     }
 
     const wasAutoAdvancing = !!autoAdvanceTimer;
+    if (roundMode) {
+      stopAutoAdvance();
+      roundComplete = true;
+      updateRoundUI();
+      return;
+    }
     await changeStock();
     if (wasAutoAdvancing) toggleAutoAdvance();
     return;
@@ -579,7 +672,7 @@ async function nextDay() {
         pos.shares = newShares;
         if (order.stopPct) pos.stopLossPrice = pos.avg_price * (1 - order.stopPct / 100);
         guest.longPos[order.symbol] = pos;
-        guest.trades.push({ date: guest.current_date, type: 'buy', shares: order.shares, price: execPrice, symbol: order.symbol });
+        tradePush({ date: guest.current_date, type: 'buy', shares: order.shares, price: execPrice, symbol: order.symbol });
       }
     } else if (order.type === 'sell') {
       const pos = guest.longPos[order.symbol];
@@ -588,7 +681,7 @@ async function nextDay() {
         guest.cash += execPrice * order.shares;
         pos.shares -= order.shares;
         if (pos.shares === 0) pos.stopLossPrice = null;
-        guest.trades.push({ date: guest.current_date, type: 'sell', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
+        tradePush({ date: guest.current_date, type: 'sell', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
       }
     } else if (order.type === 'short') {
       guest.cash += execPrice * order.shares;
@@ -598,7 +691,7 @@ async function nextDay() {
       spos.shares = newShort;
       if (order.stopPct) spos.stopLossPrice = spos.avg_price * (1 + order.stopPct / 100);
       guest.shortPos[order.symbol] = spos;
-      guest.trades.push({ date: guest.current_date, type: 'short', shares: order.shares, price: execPrice, symbol: order.symbol });
+      tradePush({ date: guest.current_date, type: 'short', shares: order.shares, price: execPrice, symbol: order.symbol });
     } else if (order.type === 'cover') {
       const spos = guest.shortPos[order.symbol];
       if (spos && spos.shares >= order.shares) {
@@ -608,7 +701,7 @@ async function nextDay() {
           guest.cash -= cost;
           spos.shares -= order.shares;
           if (spos.shares === 0) spos.stopLossPrice = null;
-          guest.trades.push({ date: guest.current_date, type: 'cover', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
+          tradePush({ date: guest.current_date, type: 'cover', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
         }
       }
     }
@@ -636,7 +729,7 @@ async function nextDay() {
         const sellPrice = Math.round(pos.stopLossPrice * (1 - slippage / 100));
         const realizedPnl = (sellPrice - pos.avg_price) * pos.shares;
         guest.cash += sellPrice * pos.shares;
-        guest.trades.push({ date: guest.current_date, type: 'sell', shares: pos.shares, price: sellPrice, realizedPnl, symbol: sym });
+        tradePush({ date: guest.current_date, type: 'sell', shares: pos.shares, price: sellPrice, realizedPnl, symbol: sym });
         stopMsgs.push(`🔴 損切り自動執行（買）: ${pos.shares}株 @${fmt(sellPrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         pos.shares = 0;
         pos.stopLossPrice = null;
@@ -648,7 +741,7 @@ async function nextDay() {
         const coverPrice = Math.round(spos.stopLossPrice * (1 + slippage / 100));
         const realizedPnl = (spos.avg_price - coverPrice) * spos.shares;
         guest.cash -= coverPrice * spos.shares;
-        guest.trades.push({ date: guest.current_date, type: 'cover', shares: spos.shares, price: coverPrice, realizedPnl, symbol: sym });
+        tradePush({ date: guest.current_date, type: 'cover', shares: spos.shares, price: coverPrice, realizedPnl, symbol: sym });
         stopMsgs.push(`🔴 損切り自動執行（空売）: ${spos.shares}株 @${fmt(coverPrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         spos.shares = 0;
         spos.stopLossPrice = null;
@@ -1811,6 +1904,12 @@ function setupEvents() {
   document.getElementById('nextDayBtn').addEventListener('click', nextDay);
   document.getElementById('resetTradeBtn').addEventListener('click', resetTradeHistory);
   document.getElementById('autoAdvanceBtn').addEventListener('click', toggleAutoAdvance);
+  document.getElementById('roundModeBtn').addEventListener('click', startRoundMode);
+  document.getElementById('endRoundModeBtn').addEventListener('click', endRoundMode);
+  document.getElementById('nextRoundBtn').addEventListener('click', async () => {
+    if (currentRound >= 3) { switchView('analysis'); }
+    else { await nextRound(); }
+  });
 
   document.getElementById('blindModeBtn').addEventListener('click', () => {
     blindMode = !blindMode;
@@ -2744,10 +2843,170 @@ function renderTradeHistoryTable(pairs) {
   }).join('');
 }
 
+// ===== 損切りクセ診断スコア =====
+
+/** 損切り粘り度（0-100, 高い=悪い）: 損失トレードの平均MAE% */
+function calcPrayerScore(lossPairs) {
+  if (!lossPairs.length) return null;
+  const maes = lossPairs.map(p => Math.abs(calcMAEMFE(p).mae));
+  const avg  = maes.reduce((a, b) => a + b, 0) / maes.length;
+  return Math.min(100, Math.round(avg * 8)); // 12.5% MAE = 100点
+}
+
+/** パニック投げ度（0-100, 高い=悪い）: 決済日バーの下位何%で売ったか */
+function calcPanicScore(lossPairs) {
+  if (!lossPairs.length) return null;
+  const scores = lossPairs.map(p => {
+    if (!guest.all_dates) return 50;
+    const bar = guest.all_dates.find(d => d.date === p.exitDate);
+    if (!bar) return 50;
+    const hi = bar.high ?? bar.close, lo = bar.low ?? bar.close;
+    if (hi === lo) return 50;
+    if (p.kind === 'long') {
+      const pos = (p.exitPrice - lo) / (hi - lo); // 0=底値, 1=高値
+      return Math.round(Math.max(0, 1 - pos) * 100);
+    } else {
+      const pos = (hi - p.exitPrice) / (hi - lo);
+      return Math.round(Math.max(0, 1 - pos) * 100);
+    }
+  });
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
+/** 一貫性スコア（0-100, 高い=良い）: 損失幅%のCV逆数 */
+function calcConsistScore(lossPairs) {
+  if (lossPairs.length < 2) return null;
+  const ratios = lossPairs.map(p => Math.abs(p.realizedPnl) / (p.entryPrice * p.shares) * 100);
+  const mean   = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+  if (!mean) return null;
+  const std  = Math.sqrt(ratios.reduce((a, b) => a + (b - mean) ** 2, 0) / ratios.length);
+  const cv   = std / mean;
+  return Math.max(0, Math.round(100 - cv * 120));
+}
+
+/** スコアカードのレンダリング */
+function renderScoreCards(pairs) {
+  const lossPairs = pairs.filter(p => p.realizedPnl < 0);
+  const winPairs  = pairs.filter(p => p.realizedPnl > 0);
+
+  const prayerScore  = calcPrayerScore(lossPairs);
+  const panicScore   = calcPanicScore(lossPairs);
+  const consistScore = calcConsistScore(lossPairs);
+
+  const setScore = (barId, numId, descId, score, desc) => {
+    document.getElementById(barId).style.width = score != null ? `${score}%` : '0%';
+    document.getElementById(numId).textContent = score != null ? `${score}/100` : '-';
+    document.getElementById(descId).textContent = desc;
+  };
+
+  const prayerDesc = lossPairs.length === 0 ? '損失トレードなし'
+    : prayerScore >= 70 ? '「まだ戻る」という根拠なき希望に支配されやすい傾向があります。'
+    : prayerScore >= 40 ? '含み損をある程度引っ張るクセがあります。損切りルール設定を推奨します。'
+    : '損切りのタイミングは比較的良好です。';
+
+  const panicDesc = lossPairs.length === 0 ? '損失トレードなし'
+    : panicScore >= 70 ? '急落を見ると計画なしに決済するクセがあります。これはギブアップです。'
+    : panicScore >= 40 ? '感情的な決済が散見されます。決済前に一呼吸おく習慣を。'
+    : '決済タイミングは比較的落ち着いています。';
+
+  const consistDesc = lossPairs.length < 2 ? '損失2件以上で計算します'
+    : consistScore >= 70 ? '損切り基準が一貫しています。ルールに従えています。'
+    : consistScore >= 40 ? 'ルールの一貫性にやや課題があります。'
+    : '損切りの基準が毎回バラバラです。相場より気分でルールを変えている可能性があります。';
+
+  setScore('barPrayer',  'scorePrayer',  'descPrayer',  prayerScore,  prayerDesc);
+  setScore('barPanic',   'scorePanic',   'descPanic',   panicScore,   panicDesc);
+  setScore('barConsist', 'scoreConsist', 'descConsist', consistScore, consistDesc);
+
+  // AI診断
+  renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, consistScore);
+}
+
+/** AI診断メッセージ */
+function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, consistScore) {
+  const el = document.getElementById('aiAdvice');
+  if (!pairs.length || lossPairs.length === 0) { el.style.display = 'none'; return; }
+
+  // 「もし5%で切っていれば節約できた額」
+  const saved = lossPairs.reduce((total, p) => {
+    const optLoss = p.entryPrice * p.shares * 0.05;
+    return total + Math.max(0, Math.abs(p.realizedPnl) - optLoss);
+  }, 0);
+
+  const avgWinPnl  = winPairs.length  ? winPairs.reduce((s,p) => s + p.realizedPnl, 0) / winPairs.length   : 0;
+  const avgLossPnl = lossPairs.length ? lossPairs.reduce((s,p) => s + Math.abs(p.realizedPnl), 0) / lossPairs.length : 0;
+  const ratio      = avgWinPnl && avgLossPnl ? (avgLossPnl / avgWinPnl).toFixed(1) : null;
+
+  const lines = ['【AI診断】'];
+  if (ratio && parseFloat(ratio) > 1.5)
+    lines.push(`あなたの「負けの波」は「勝ちの波」の<strong>${ratio}倍</strong>の大きさです。1回の負けを取り返すのに${Math.ceil(parseFloat(ratio))}回の勝ちが必要な「利小損大」パターンです。`);
+  if (saved > 0)
+    lines.push(`損失トレードで含み損5%のルールを厳守していれば、合計<strong>${fmt(Math.round(saved))}円</strong>の損失を回避できていた計算です。`);
+  if (prayerScore != null && prayerScore >= 70)
+    lines.push(`含み損が膨らんでも保有し続けるクセが顕著です。次回の練習では含み損<strong>-5%</strong>に達した瞬間に「無心で」切る訓練をしましょう。`);
+  if (panicScore != null && panicScore >= 60)
+    lines.push(`急落した日の底値付近で売るクセがあります。「パニック決済」は計画的な損切りではありません。決済前に3秒間立ち止まる習慣を。`);
+  if (roundMode && currentSessionId)
+    lines.push(`3ラウンドの記録が蓄積されると、ラウンド間のクセの変化を比較できます。`);
+
+  el.innerHTML = lines.join('<br>');
+  el.style.display = '';
+}
+
+/** ラウンド別比較セクション */
+function renderRoundComparison(pairs) {
+  const sec = document.getElementById('roundCompareSection');
+  if (!currentSessionId) { sec.style.display = 'none'; return; }
+
+  const rounds = [1, 2, 3];
+  const roundData = rounds.map(r => {
+    const rPairs = pairs.filter(p => p.round === r && p.sessionId === currentSessionId && p.realizedPnl !== undefined);
+    if (!rPairs.length) return null;
+    const wins    = rPairs.filter(p => p.realizedPnl > 0);
+    const losses  = rPairs.filter(p => p.realizedPnl < 0);
+    const totalPnl = rPairs.reduce((s, p) => s + p.realizedPnl, 0);
+    const avgMAE   = losses.length ? losses.reduce((s, p) => s + Math.abs(calcMAEMFE(p).mae), 0) / losses.length : 0;
+    const prayerSc = calcPrayerScore(losses);
+    return { r, count: rPairs.length, wins: wins.length, totalPnl, avgMAE, prayerSc };
+  }).filter(Boolean);
+
+  if (!roundData.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+
+  let html = `<table class="trade-table"><thead><tr>
+    <th>ラウンド</th><th>トレード数</th><th>勝ち</th><th>総損益</th><th>平均MAE</th><th>粘り度</th>
+  </tr></thead><tbody>`;
+  for (const d of roundData) {
+    const pnlCls = d.totalPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    html += `<tr>
+      <td>Round ${d.r}</td>
+      <td style="text-align:center">${d.count}</td>
+      <td style="text-align:center">${d.wins}</td>
+      <td class="${pnlCls}">${d.totalPnl >= 0 ? '+' : ''}${fmt(d.totalPnl)}円</td>
+      <td>${d.avgMAE.toFixed(1)}%</td>
+      <td>${d.prayerSc != null ? `${d.prayerSc}/100` : '-'}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  if (roundData.length >= 2) {
+    const r1 = roundData[0], rLast = roundData[roundData.length - 1];
+    if (r1.prayerSc != null && rLast.prayerSc != null) {
+      const diff = rLast.prayerSc - r1.prayerSc;
+      if (diff > 10)
+        html += `<div class="ana-insight" style="margin-top:8px">⚠️ ラウンドが進むほど粘り度が上昇しています（+${diff}pt）。同じ銘柄でも損切りがどんどん遅くなる傾向があります。</div>`;
+      else if (diff < -10)
+        html += `<div class="ana-insight" style="margin-top:8px">✅ ラウンドが進むほど損切りが改善しています（${diff}pt）。練習の効果が出ています。</div>`;
+    }
+  }
+  document.getElementById('roundCompareContent').innerHTML = html;
+}
+
 /** 分析タブ全体レンダリング */
 function renderAnalysis() {
   const pairs = buildTradePairs();
   renderAnalysisStats(pairs);
+  renderScoreCards(pairs);
+  renderRoundComparison(pairs);
   renderHoldPnlScatter(pairs);
   renderMAEMFEChart(pairs);
   renderSequenceAnalysis(pairs);
