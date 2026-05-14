@@ -462,6 +462,9 @@ function endRoundMode() {
   roundSessionStartIdx = null;
   roundSessionCandles  = null;
   roundSessionName    = null;
+  // ラウンド比較チャートを破棄（通常モードのチャートで再作成させる）
+  if (pnlChart?._roundMode)      { pnlChart.destroy();      pnlChart      = null; }
+  if (pnlChartLarge?._roundMode) { pnlChartLarge.destroy(); pnlChartLarge = null; }
   updateRoundUI();
 }
 
@@ -1458,7 +1461,115 @@ function buildHoldDaysData(trades) {
 }
 
 function renderPnl() {
+  if (roundMode) { _renderPnlRound(); return; }
+  // 通常モード：ラウンドチャートが残っていれば破棄して再作成
+  if (pnlChart?._roundMode)      { pnlChart.destroy();      pnlChart      = null; }
+  if (pnlChartLarge?._roundMode) { pnlChartLarge.destroy(); pnlChartLarge = null; }
   renderPnlData(buildHoldDaysData(guest.trades));
+}
+
+// 3Rモード専用：ラウンドごとの実現損益を3本線で比較表示
+function _renderPnlRound() {
+  // ラウンド別データ（各ラウンド独立して 0 スタート）
+  const roundsData = [1, 2, 3].map(r => {
+    const data = buildHoldDaysData(guest.trades.filter(t => t.round === r));
+    return [{ holdDays: 0, value: 0 }, ...data];
+  });
+
+  // 全ラウンドの holdDays を統合してx軸を作成
+  const allDays = [...new Set(roundsData.flat().map(d => d.holdDays))].sort((a, b) => a - b);
+  if (!allDays.length || allDays[0] !== 0) allDays.unshift(0);
+  const labels = allDays.map(d => `${d}日`);
+
+  // 各ラウンドの値を allDays に揃える（前値を繰り越し）
+  const getVals = (pts) => allDays.map(day => {
+    const prev = pts.filter(p => p.holdDays <= day);
+    return prev.length ? prev[prev.length - 1].value : 0;
+  });
+
+  const makeDatasets = () => [
+    ...COMP_COLORS.map((c, i) => ({
+      label: `R${i + 1}`, data: [],
+      borderColor: c.border, backgroundColor: 'transparent',
+      fill: false, tension: 0, pointRadius: 0, borderWidth: 1.5,
+    })),
+    { label: '', data: [], borderColor: '#4b5563', borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false },
+  ];
+
+  const makePlugin = () => ({
+    id: 'roundPnlLabel',
+    afterDraw(chart) {
+      const { ctx, chartArea: { left, top } } = chart;
+      const fv = chart._roundFinalVals || [];
+      const dl = chart._roundDataLengths || [];
+      ctx.save();
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textBaseline = 'top';
+      COMP_COLORS.forEach((c, i) => {
+        if (!dl[i] || dl[i] <= 1) return; // 未取引ラウンドはスキップ
+        const v = fv[i] ?? 0;
+        const s = Math.abs(v) >= 10000
+          ? `R${i + 1}: ${(v / 10000).toFixed(1)}万円`
+          : `R${i + 1}: ${v >= 0 ? '+' : ''}${v.toFixed(0)}円`;
+        ctx.fillStyle = c.border;
+        ctx.textAlign = 'left';
+        ctx.fillText(s, left + 4, top + 4 + i * 14);
+      });
+      ctx.restore();
+    },
+  });
+
+  const opts = {
+    animation: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { maxTicksLimit: 3, color: '#6b7280', font: { size: 10 } }, grid: { color: '#1e1e30' } },
+      y: {
+        ticks: { color: '#6b7280', font: { size: 10 },
+          callback: v => Math.abs(v) >= 10000 ? `${(v / 10000).toFixed(0)}万` : `${v}` },
+        grid: { color: '#1e1e30' },
+      },
+    },
+  };
+
+  // データを既存チャートに適用
+  const applyData = (chart) => {
+    chart._roundFinalVals    = roundsData.map(pts => pts[pts.length - 1]?.value ?? 0);
+    chart._roundDataLengths  = roundsData.map(pts => pts.length);
+    chart.data.labels = labels;
+    chart.data.datasets.forEach((ds, i) => {
+      ds.data = i < 3 ? getVals(roundsData[i]) : allDays.map(() => 0);
+    });
+    chart.update('none');
+  };
+
+  // サイドバーの pnlChart
+  if (pnlChart?._roundMode) {
+    applyData(pnlChart);
+  } else {
+    if (pnlChart) pnlChart.destroy();
+    pnlChart = new Chart(
+      document.getElementById('pnlChart').getContext('2d'),
+      { type: 'line', data: { labels, datasets: makeDatasets() }, plugins: [makePlugin()], options: opts }
+    );
+    pnlChart._roundMode = true;
+    applyData(pnlChart);
+  }
+
+  // 拡大ビューの pnlChartLarge
+  const canvasL = document.getElementById('pnlChartLarge');
+  if (!canvasL) return;
+  if (pnlChartLarge?._roundMode) {
+    applyData(pnlChartLarge);
+  } else {
+    if (pnlChartLarge) pnlChartLarge.destroy();
+    pnlChartLarge = new Chart(
+      canvasL.getContext('2d'),
+      { type: 'line', data: { labels, datasets: makeDatasets() }, plugins: [makePlugin()], options: opts }
+    );
+    pnlChartLarge._roundMode = true;
+    applyData(pnlChartLarge);
+  }
 }
 
 function renderPnlData(data) {
