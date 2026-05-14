@@ -332,43 +332,70 @@
           <!-- 使い方 -->
           <div class="settings-tab-content hidden" id="tabHelp">
             <div class="help-content">
+
               <div class="help-section">
                 <div class="help-section-title">基本の流れ</div>
                 <ol class="help-list">
-                  <li>「銘柄変更」でランダムな銘柄・時代が選択される</li>
-                  <li>チャートを分析して注文モードと株数を設定</li>
+                  <li>「銘柄変更」でランダムな銘柄・時代が選択される（過去200本のチャートが表示）</li>
+                  <li>チャートを分析して注文モードと株数を設定する</li>
                   <li>「買い」または「空売り」で注文 → 翌日の始値で約定</li>
-                  <li>「翌日へ」または自動更新でチャートを進める</li>
-                  <li>保有ポジションを決済して利益を積み上げる</li>
+                  <li>「翌日へ [SPACE]」または自動更新でチャートを進める</li>
+                  <li>保有ポジションを決済して損益を確認する</li>
                 </ol>
               </div>
+
               <div class="help-section">
                 <div class="help-section-title">注文モード</div>
                 <dl class="help-dl">
                   <dt>株数</dt><dd>指定した株数をそのまま発注する</dd>
                   <dt>所持金の%</dt><dd>手持ち資金の指定割合分を発注する</dd>
-                  <dt>リスク管理</dt><dd>許容損失（総資産×R%）と損切り幅（S%）から株数を自動計算する</dd>
+                  <dt>リスク管理</dt><dd>許容損失（総資産×R%）と損切り幅（S%）から株数を自動計算する。株数 ＝ 総資産×R% ÷（価格×S%）</dd>
                 </dl>
               </div>
-              <div class="help-section">
-                <div class="help-section-title">リスク管理の使い方</div>
-                <p class="help-p">「1回のトレードで総資産の何%まで損してよいか」を基準に株数を決める。株数 ＝ 総資産 × R% ÷ （価格 × S%）</p>
-              </div>
+
               <div class="help-section">
                 <div class="help-section-title">損切り自動執行</div>
-                <p class="help-p">リスク管理モードで注文すると損切り価格が固定される。「損切り自動執行」をONにすると自動決済される。</p>
+                <p class="help-p">リスク管理モードで注文すると損切り価格が設定される。「損切り自動執行」をONにすると、その価格に達した日に自動で決済される。</p>
               </div>
+
+              <div class="help-section">
+                <div class="help-section-title">🙈 ブラインドモード</div>
+                <p class="help-p">銘柄名・日付・チャートの時間軸を隠す。先入観なしにチャートの形だけで判断する練習ができる。</p>
+              </div>
+
+              <div class="help-section">
+                <div class="help-section-title">🔁 3ラウンドモード</div>
+                <ol class="help-list">
+                  <li>「3ラウンド」ボタンを押すとランダムな銘柄が選択され、ブラインドで開始</li>
+                  <li>同じ銘柄・同じ開始地点を3回繰り返してトレードする</li>
+                  <li>各ラウンド終了後に「ラウンド2へ」「ラウンド3へ」と進む</li>
+                  <li>3ラウンド終了後「📊 分析を見る」で結果を確認できる</li>
+                </ol>
+                <p class="help-p">実現損益グラフには3ラウンド分の折れ線が重なって表示され、判断の改善を比較できる。</p>
+              </div>
+
+              <div class="help-section">
+                <div class="help-section-title">📊 分析ビュー</div>
+                <dl class="help-dl">
+                  <dt>保有日数 vs 実現損益</dt><dd>損切りが早く・利益を伸ばせているかを散布図で確認する（プロスペクト理論の確認）</dd>
+                  <dt>トレード一覧</dt><dd>全トレードの詳細を日付・損益付きで確認できる</dd>
+                </dl>
+              </div>
+
+              <div class="help-section">
+                <div class="help-section-title">📈 売買方法比較グラフ</div>
+                <p class="help-p">リスク管理モードで最初に注文した時点を起点に、同じタイミングで「所持金50%」「固定100株」で取引した場合と実現損益を比較する。自分のリスク管理が他の方法より優れているか確認できる。</p>
+              </div>
+
               <div class="help-section">
                 <div class="help-section-title">キーボードショートカット</div>
                 <dl class="help-dl">
                   <dt>Space</dt><dd>翌日へ進む</dd>
                   <dt>N</dt><dd>銘柄を変更する</dd>
+                  <dt>買い・空売り・決済</dt><dd>設定タブ「キー設定」で任意のキーに割り当て可能</dd>
                 </dl>
               </div>
-              <div class="help-section">
-                <div class="help-section-title">グラフ</div>
-                <p class="help-p">「売買方法比較」グラフは、リスク管理モードで最初に注文した時点から、同じタイミングで「所持金50%」「固定100株」で取引した場合と損益を比較する。</p>
-              </div>
+
             </div>
           </div>
 
