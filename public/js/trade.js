@@ -3181,8 +3181,9 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
 
   const goals = goalCandidates.length ? goalCandidates.slice(0, 2) : ['今のペースを維持する'];
   const goalEl = document.getElementById('nextGoal');
-  goalEl.innerHTML = `<div class="goal-title">次回の目標</div>`
-    + goals.map(g => `<div class="goal-item">${g}</div>`).join('');
+  goalEl.style.cssText = 'flex:0 0 180px;background:linear-gradient(135deg,rgba(34,197,94,0.08),rgba(16,185,129,0.08));border:1px solid rgba(34,197,94,0.4);border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;color:var(--text);';
+  goalEl.innerHTML = `<div style="font-weight:bold;color:#22c55e;margin-bottom:4px;">次回の目標</div>`
+    + goals.map(g => `<div><span style="color:#22c55e;">✓ </span>${g}</div>`).join('');
 
   rowEl.style.display = 'flex';
   rowEl.style.gap = '12px';
