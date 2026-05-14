@@ -600,8 +600,20 @@ function toggleAutoAdvance() {
 
 // --- Next day ---
 async function nextDay() {
-  if (!gameActive) return;
+  if (!gameActive) {
+    console.warn('[nextDay] blocked: gameActive=false');
+    return;
+  }
+  try {
+    await _nextDayCore();
+  } catch (e) {
+    console.error('[nextDay] error:', e);
+    const msgEl = document.getElementById('orderMsg');
+    if (msgEl) { msgEl.textContent = `[debug] nextDay error: ${e.message}`; msgEl.className = 'msg error'; }
+  }
+}
 
+async function _nextDayCore() {
   guest.current_idx++;
   if (guest.current_idx >= guest.all_dates.length) {
     const lastDay = guest.all_dates[guest.all_dates.length - 1];
@@ -1888,12 +1900,19 @@ function updatePendingDisplay(orders) {
 }
 
 async function executeOrder(orderType) {
-  if (!gameActive) return;
+  const msgEl = document.getElementById('orderMsg');
+  if (!gameActive) {
+    msgEl.textContent = `[debug] gameActive=false`;
+    msgEl.className = 'msg error';
+    return;
+  }
   const price = currentCandles[currentCandles.length - 1]?.close;
   const shares = getEffectiveShares(price);
-  if (!currentSymbol || !shares || shares <= 0) return;
-
-  const msgEl = document.getElementById('orderMsg');
+  if (!currentSymbol || !shares || shares <= 0) {
+    msgEl.textContent = `[debug] sym=${currentSymbol} price=${price} shares=${shares}`;
+    msgEl.className = 'msg error';
+    return;
+  }
   if (!price) { msgEl.textContent = '価格データがありません'; msgEl.className = 'msg error'; return; }
   // 比較シミュレーション用の株数を注文時終値で計算（実際のモードと同じタイミング）
   const pctInput = parseFloat(document.getElementById('percentInput').value) || 50;
