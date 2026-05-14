@@ -3178,13 +3178,25 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
     goalCandidates.push('エントリーを半分に絞る');
 
   const goals = goalCandidates.length ? goalCandidates.slice(0, 2) : ['今のペースを維持する'];
-  const goalHtml = `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(99,102,241,0.3);">`
-    + `<span style="font-weight:bold;color:#22c55e;">次回の目標: </span>`
-    + goals.map(g => `<span style="margin-right:16px;"><span style="color:#22c55e;">✓</span> ${g}</span>`).join('')
-    + `</div>`;
 
-  el.innerHTML = lines.join('<br>') + goalHtml;
-  rowEl.style.display = '';
+  el.innerHTML = lines.join('<br>');
+  el.style.flex = '1';
+  el.style.minWidth = '0';
+
+  const goalEl = document.getElementById('nextGoal');
+  goalEl.style.cssText = [
+    'flex:0 0 180px',
+    'background:linear-gradient(135deg,rgba(34,197,94,0.08),rgba(16,185,129,0.08))',
+    'border:1px solid rgba(34,197,94,0.4)',
+    'border-radius:8px',
+    'padding:12px 14px',
+    'font-size:12px',
+    'line-height:1.7',
+  ].join(';');
+  goalEl.innerHTML = `<div style="font-weight:bold;color:#22c55e;margin-bottom:6px;">次回の目標</div>`
+    + goals.map(g => `<div style="margin-bottom:4px;"><span style="color:#22c55e;">✓</span> ${g}</div>`).join('');
+
+  rowEl.style.cssText = 'display:flex;gap:12px;align-items:flex-start;';
 }
 
 /** ラウンド別比較セクション */
