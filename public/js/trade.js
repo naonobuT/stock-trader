@@ -38,6 +38,7 @@ let pnlFinalValue = 0;
 let autoAdvanceTimer = null;
 let autoAdvanceGen = 0;
 let isChangingStock = false;
+let isNextDayRunning = false;
 let userZoomSet = false;
 
 const indicatorState = {
@@ -433,6 +434,7 @@ async function startRoundMode() {
   } finally {
     isChangingStock = false;
   }
+  switchView('candle');
   updateRoundUI();
 }
 
@@ -448,6 +450,7 @@ async function nextRound() {
   } finally {
     isChangingStock = false;
   }
+  switchView('candle');
   updateRoundUI();
 }
 
@@ -599,6 +602,12 @@ function toggleAutoAdvance() {
 // --- Next day ---
 async function nextDay() {
   if (!gameActive) return;
+  if (isNextDayRunning) return;
+  isNextDayRunning = true;
+  try { await _nextDayImpl(); } finally { isNextDayRunning = false; }
+}
+
+async function _nextDayImpl() {
 
   guest.current_idx++;
   if (guest.current_idx >= guest.all_dates.length) {
@@ -774,7 +783,12 @@ async function nextDay() {
   };
   if (newCandle.open && newCandle.close) {
     currentCandles.push(newCandle);
-    appendDayToChart(newCandle);
+    try {
+      appendDayToChart(newCandle);
+    } catch (e) {
+      console.warn('[chart] appendDayToChart failed, falling back to refreshChart:', e.message);
+      await refreshChart();
+    }
     applySliderToChart(parseInt(document.getElementById('rangeSlider').value));
     blindActualDate = jaFullDate(raw.date);
     blindDayCount++;
@@ -1985,11 +1999,13 @@ function setupEvents() {
     document.getElementById('slippageRow').style.display = this.checked ? '' : 'none';
   });
 
-  document.querySelector('.order-tab[data-type="buy"]').addEventListener('click', () => {
-    if (gameActive) executeOrder('buy');
+  document.querySelector('.order-tab[data-type="buy"]').addEventListener('click', async (e) => {
+    e.currentTarget.blur();
+    if (gameActive) await executeOrder('buy');
   });
-  document.querySelector('.order-tab[data-type="short"]').addEventListener('click', () => {
-    if (gameActive) executeOrder('short');
+  document.querySelector('.order-tab[data-type="short"]').addEventListener('click', async (e) => {
+    e.currentTarget.blur();
+    if (gameActive) await executeOrder('short');
   });
 
   document.querySelectorAll('.mode-btn').forEach(btn => {
