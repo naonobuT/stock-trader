@@ -3070,8 +3070,9 @@ function renderScoreCards(pairs) {
 
 /** AI診断メッセージ */
 function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, consistScore) {
-  const el = document.getElementById('aiAdvice');
-  if (!pairs.length || lossPairs.length === 0) { el.style.display = 'none'; return; }
+  const el    = document.getElementById('aiAdvice');
+  const rowEl = document.getElementById('aiAdviceRow');
+  if (!pairs.length || lossPairs.length === 0) { rowEl.style.display = 'none'; return; }
 
   // 「もし5%で切っていれば節約できた額」
   const saved = lossPairs.reduce((total, p) => {
@@ -3083,7 +3084,42 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
   const avgLossPnl = lossPairs.length ? lossPairs.reduce((s,p) => s + Math.abs(p.realizedPnl), 0) / lossPairs.length : 0;
   const ratio      = avgWinPnl && avgLossPnl ? (avgLossPnl / avgWinPnl).toFixed(1) : null;
 
+  // ① MFEの使い残し（利確が早すぎる）
+  const avgWinMFE = winPairs.length
+    ? winPairs.reduce((s, p) => s + calcMAEMFE(p).mfe, 0) / winPairs.length : 0;
+  const avgWinPct = winPairs.length
+    ? winPairs.reduce((s, p) => s + p.realizedPnl / (p.entryPrice * p.shares) * 100, 0) / winPairs.length : 0;
+  const mfeUsage  = avgWinMFE > 0 ? avgWinPct / avgWinMFE : null;
+
+  // ② 保有期間：損失 vs 利益
+  const avgWinHold  = winPairs.length
+    ? winPairs.reduce((s, p) => s + calcHoldDays(p.entryDate, p.exitDate), 0) / winPairs.length  : 0;
+  const avgLossHold = lossPairs.length
+    ? lossPairs.reduce((s, p) => s + calcHoldDays(p.entryDate, p.exitDate), 0) / lossPairs.length : 0;
+
+  // ④ リベンジトレード件数
+  let revengeCount = 0;
+  for (let i = 0; i < pairs.length - 1; i++) {
+    const curr = pairs[i], next = pairs[i + 1];
+    const lotChg = (next.shares - curr.shares) / curr.shares * 100;
+    const gap    = calcHoldDays(curr.exitDate, next.entryDate);
+    if (curr.realizedPnl < 0 && (lotChg > 30 || gap <= 1)) revengeCount++;
+  }
+
+  // ⑦ オーバートレード（期間あたりのトレード密度）
+  const tradingDays = (() => {
+    if (!guest.all_dates || !pairs.length) return null;
+    const allDates  = pairs.flatMap(p => [p.entryDate, p.exitDate]);
+    const minDate   = allDates.reduce((a, b) => a < b ? a : b);
+    const maxDate   = allDates.reduce((a, b) => a > b ? a : b);
+    const minIdx    = guest.all_dates.findIndex(d => d.date >= minDate);
+    const maxIdx    = guest.all_dates.findIndex(d => d.date >= maxDate);
+    return minIdx >= 0 && maxIdx >= 0 ? maxIdx - minIdx + 1 : null;
+  })();
+
   const lines = ['【AI診断】'];
+
+  // === 悪いクセを指摘 ===
   if (ratio && parseFloat(ratio) > 1.5)
     lines.push(`あなたの「負けの波」は「勝ちの波」の<strong>${ratio}倍</strong>の大きさです。1回の負けを取り返すのに${Math.ceil(parseFloat(ratio))}回の勝ちが必要な「利小損大」パターンです。`);
   if (saved > 0)
@@ -3092,11 +3128,63 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
     lines.push(`含み損が膨らんでも保有し続けるクセが顕著です。次回の練習では含み損<strong>-5%</strong>に達した瞬間に「無心で」切る訓練をしましょう。`);
   if (panicScore != null && panicScore >= 60)
     lines.push(`急落した日の底値付近で売るクセがあります。「パニック決済」は計画的な損切りではありません。決済前に3秒間立ち止まる習慣を。`);
+
+  // ① 利確が早すぎる（最大含み益の50%未満しか取れていない）
+  if (winPairs.length >= 2 && mfeUsage !== null && mfeUsage < 0.5 && avgWinMFE > 2)
+    lines.push(`勝ちトレードの最大含み益は平均<strong>${avgWinMFE.toFixed(1)}%</strong>あったのに、実際に確定したのは<strong>${avgWinPct.toFixed(1)}%</strong>（${Math.round(mfeUsage * 100)}%）だけです。利益を途中で切り上げるクセがあります。`);
+
+  // ② 損は長く・利は短く（保有期間の逆転）
+  if (winPairs.length >= 2 && lossPairs.length >= 2 && avgLossHold > avgWinHold * 1.5 && avgWinHold > 0)
+    lines.push(`損失トレードの平均保有<strong>${avgLossHold.toFixed(0)}日</strong>に対し、利益トレードは<strong>${avgWinHold.toFixed(0)}日</strong>で決済しています。利益を急いで確定し、損失を引っ張るクセがあります。`);
+
+  // ③ 一貫性がない損切り
+  if (consistScore != null && consistScore < 30 && lossPairs.length >= 3)
+    lines.push(`損切り幅がトレードごとにバラバラです（一貫性スコア: <strong>${consistScore}/100</strong>）。毎回違う基準で損切りしており、ルールが機能していません。`);
+
+  // ④ リベンジトレード
+  if (revengeCount >= 2)
+    lines.push(`損失直後にロットを増やすリベンジトレードのパターンが<strong>${revengeCount}回</strong>あります。感情的なリカバリー狙いは損失を拡大させるリスクがあります。`);
+
+  // ⑦ オーバートレード
+  if (tradingDays !== null && pairs.length >= 8 && tradingDays / pairs.length < 3)
+    lines.push(`${tradingDays}日間に<strong>${pairs.length}回</strong>のトレードは多すぎる可能性があります。厳選したエントリーに絞ると判断の質が上がります。`);
+
+  // === 良い面を認める ===
+  if (prayerScore != null && prayerScore < 30 && lossPairs.length >= 2)
+    lines.push(`損切り粘り度は<strong>${prayerScore}/100</strong>。素早い損切りができています。このスピードを全トレードで維持できれば資金は守れます。`);
+  if (panicScore != null && panicScore < 30 && lossPairs.length >= 2)
+    lines.push(`急落時も底値でのパニック売りをしていません（パニック度: <strong>${panicScore}/100</strong>）。感情的な決済を抑えられています。`);
+
   if (roundMode && currentSessionId)
     lines.push(`3ラウンドの記録が蓄積されると、ラウンド間のクセの変化を比較できます。`);
 
   el.innerHTML = lines.join('<br>');
-  el.style.display = '';
+
+  // 次回の目標（優先度順に最大2件）
+  const goalCandidates = [];
+  if (prayerScore != null && prayerScore >= 70)
+    goalCandidates.push('含み損-5%で即損切り');
+  if (revengeCount >= 2)
+    goalCandidates.push('負け後はロット据え置き');
+  if (ratio && parseFloat(ratio) > 1.5)
+    goalCandidates.push('利益を焦って確定しない');
+  if (panicScore != null && panicScore >= 60)
+    goalCandidates.push('急落時は3秒待ってから決済');
+  if (winPairs.length >= 2 && mfeUsage !== null && mfeUsage < 0.5 && avgWinMFE > 2)
+    goalCandidates.push('利益は含み益の70%以上取る');
+  if (winPairs.length >= 2 && lossPairs.length >= 2 && avgLossHold > avgWinHold * 1.5 && avgWinHold > 0)
+    goalCandidates.push('勝ちを負けより長く持つ');
+  if (consistScore != null && consistScore < 30 && lossPairs.length >= 3)
+    goalCandidates.push('損切りは必ず-5%で統一');
+  if (tradingDays !== null && pairs.length >= 8 && tradingDays / pairs.length < 3)
+    goalCandidates.push('エントリーを半分に絞る');
+
+  const goals = goalCandidates.length ? goalCandidates.slice(0, 2) : ['今のペースを維持する'];
+  const goalEl = document.getElementById('nextGoal');
+  goalEl.innerHTML = `<div class="goal-title">次回の目標</div>`
+    + goals.map(g => `<div class="goal-item">${g}</div>`).join('');
+
+  rowEl.style.display = '';
 }
 
 /** ラウンド別比較セクション */
