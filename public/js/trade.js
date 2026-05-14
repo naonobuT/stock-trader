@@ -17,7 +17,7 @@ let roundComplete       = false; // 現ラウンド終了待ち
 
 /** round/sessionId を自動付与してトレードを記録 */
 function tradePush(obj) {
-  tradePush({ ...obj, round: currentRound || 0, sessionId: currentSessionId || null });
+  guest.trades.push({ ...obj, round: currentRound || 0, sessionId: currentSessionId || null });
 }
 let volChart = null, volSeries = null;
 let pnlChart = null, pnlChartLarge = null;
@@ -600,17 +600,8 @@ function toggleAutoAdvance() {
 
 // --- Next day ---
 async function nextDay() {
-  if (!gameActive) {
-    console.warn('[nextDay] blocked: gameActive=false');
-    return;
-  }
-  try {
-    await _nextDayCore();
-  } catch (e) {
-    console.error('[nextDay] error:', e);
-    const msgEl = document.getElementById('orderMsg');
-    if (msgEl) { msgEl.textContent = `[debug] nextDay error: ${e.message}`; msgEl.className = 'msg error'; }
-  }
+  if (!gameActive) return;
+  await _nextDayCore();
 }
 
 async function _nextDayCore() {
@@ -1901,18 +1892,10 @@ function updatePendingDisplay(orders) {
 
 async function executeOrder(orderType) {
   const msgEl = document.getElementById('orderMsg');
-  if (!gameActive) {
-    msgEl.textContent = `[debug] gameActive=false`;
-    msgEl.className = 'msg error';
-    return;
-  }
+  if (!gameActive) return;
   const price = currentCandles[currentCandles.length - 1]?.close;
   const shares = getEffectiveShares(price);
-  if (!currentSymbol || !shares || shares <= 0) {
-    msgEl.textContent = `[debug] sym=${currentSymbol} price=${price} shares=${shares}`;
-    msgEl.className = 'msg error';
-    return;
-  }
+  if (!currentSymbol || !shares || shares <= 0) return;
   if (!price) { msgEl.textContent = '価格データがありません'; msgEl.className = 'msg error'; return; }
   // 比較シミュレーション用の株数を注文時終値で計算（実際のモードと同じタイミング）
   const pctInput = parseFloat(document.getElementById('percentInput').value) || 50;
