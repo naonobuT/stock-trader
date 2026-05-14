@@ -3184,7 +3184,9 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
   goalEl.innerHTML = `<div class="goal-title">次回の目標</div>`
     + goals.map(g => `<div class="goal-item">${g}</div>`).join('');
 
-  rowEl.style.display = '';
+  rowEl.style.display = 'flex';
+  rowEl.style.gap = '12px';
+  rowEl.style.alignItems = 'flex-start';
 }
 
 /** ラウンド別比較セクション */
