@@ -630,7 +630,8 @@ async function _nextDayCore() {
       if (pos.shares > 0) {
         const realizedPnl = (closePrice - pos.avg_price) * pos.shares;
         guest.cash += closePrice * pos.shares;
-        tradePush({ date: closeDate, type: 'sell', shares: pos.shares, price: closePrice, realizedPnl, symbol: sym });
+        const cm = computeCloseMetrics(pos.entryDate || closeDate, closeDate, pos.avg_price, 'long');
+        tradePush({ date: closeDate, type: 'sell', shares: pos.shares, price: closePrice, realizedPnl, symbol: sym, ...cm });
         for (const sim of Object.values(compSims)) simExecuteOrder(sim, 'sell', sym, closePrice, 0, closeDate);
         forcedLines.push(`買→強制売却 ${pos.shares}株 @${fmt(closePrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         pos.shares = 0;
@@ -640,7 +641,8 @@ async function _nextDayCore() {
       if (spos.shares > 0) {
         const realizedPnl = (spos.avg_price - closePrice) * spos.shares;
         guest.cash -= closePrice * spos.shares;
-        tradePush({ date: closeDate, type: 'cover', shares: spos.shares, price: closePrice, realizedPnl, symbol: sym });
+        const cm = computeCloseMetrics(spos.entryDate || closeDate, closeDate, spos.avg_price, 'short');
+        tradePush({ date: closeDate, type: 'cover', shares: spos.shares, price: closePrice, realizedPnl, symbol: sym, ...cm });
         for (const sim of Object.values(compSims)) simExecuteOrder(sim, 'cover', sym, closePrice, 0, closeDate);
         forcedLines.push(`空売→強制買戻 ${spos.shares}株 @${fmt(closePrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         spos.shares = 0;
@@ -681,6 +683,7 @@ async function _nextDayCore() {
       if (guest.cash >= cost) {
         guest.cash -= cost;
         const pos = guest.longPos[order.symbol] || { shares: 0, avg_price: 0 };
+        if (pos.shares === 0) pos.entryDate = guest.current_date;
         const newShares = pos.shares + order.shares;
         pos.avg_price = (pos.avg_price * pos.shares + execPrice * order.shares) / newShares;
         pos.shares = newShares;
@@ -695,11 +698,13 @@ async function _nextDayCore() {
         guest.cash += execPrice * order.shares;
         pos.shares -= order.shares;
         if (pos.shares === 0) pos.stopLossPrice = null;
-        tradePush({ date: guest.current_date, type: 'sell', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
+        const cm = computeCloseMetrics(pos.entryDate || guest.current_date, guest.current_date, pos.avg_price, 'long');
+        tradePush({ date: guest.current_date, type: 'sell', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol, ...cm });
       }
     } else if (order.type === 'short') {
       guest.cash += execPrice * order.shares;
       const spos = guest.shortPos[order.symbol] || { shares: 0, avg_price: 0 };
+      if (spos.shares === 0) spos.entryDate = guest.current_date;
       const newShort = spos.shares + order.shares;
       spos.avg_price = (spos.avg_price * spos.shares + execPrice * order.shares) / newShort;
       spos.shares = newShort;
@@ -715,7 +720,8 @@ async function _nextDayCore() {
           guest.cash -= cost;
           spos.shares -= order.shares;
           if (spos.shares === 0) spos.stopLossPrice = null;
-          tradePush({ date: guest.current_date, type: 'cover', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol });
+          const cm = computeCloseMetrics(spos.entryDate || guest.current_date, guest.current_date, spos.avg_price, 'short');
+          tradePush({ date: guest.current_date, type: 'cover', shares: order.shares, price: execPrice, realizedPnl, symbol: order.symbol, ...cm });
         }
       }
     }
@@ -743,7 +749,8 @@ async function _nextDayCore() {
         const sellPrice = Math.round(pos.stopLossPrice * (1 - slippage / 100));
         const realizedPnl = (sellPrice - pos.avg_price) * pos.shares;
         guest.cash += sellPrice * pos.shares;
-        tradePush({ date: guest.current_date, type: 'sell', shares: pos.shares, price: sellPrice, realizedPnl, symbol: sym });
+        const cm = computeCloseMetrics(pos.entryDate || guest.current_date, guest.current_date, pos.avg_price, 'long');
+        tradePush({ date: guest.current_date, type: 'sell', shares: pos.shares, price: sellPrice, realizedPnl, symbol: sym, ...cm });
         stopMsgs.push(`🔴 損切り自動執行（買）: ${pos.shares}株 @${fmt(sellPrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         pos.shares = 0;
         pos.stopLossPrice = null;
@@ -755,7 +762,8 @@ async function _nextDayCore() {
         const coverPrice = Math.round(spos.stopLossPrice * (1 + slippage / 100));
         const realizedPnl = (spos.avg_price - coverPrice) * spos.shares;
         guest.cash -= coverPrice * spos.shares;
-        tradePush({ date: guest.current_date, type: 'cover', shares: spos.shares, price: coverPrice, realizedPnl, symbol: sym });
+        const cm = computeCloseMetrics(spos.entryDate || guest.current_date, guest.current_date, spos.avg_price, 'short');
+        tradePush({ date: guest.current_date, type: 'cover', shares: spos.shares, price: coverPrice, realizedPnl, symbol: sym, ...cm });
         stopMsgs.push(`🔴 損切り自動執行（空売）: ${spos.shares}株 @${fmt(coverPrice)}円（${realizedPnl >= 0 ? '+' : ''}${fmt(realizedPnl)}円）`);
         spos.shares = 0;
         spos.stopLossPrice = null;
@@ -2767,26 +2775,44 @@ document.querySelectorAll('.view-tab').forEach(tab => {
 let holdPnlChartInst = null;
 let maeMfeChartInst  = null;
 
-/** buy→sell / short→cover をペアリング（現在の銘柄のみ） */
+/** 決済時点の guest.all_dates を使って MAE/MFE/保有日数/終値バーを計算 */
+function computeCloseMetrics(entryDate, exitDate, entryPrice, kind) {
+  const { mae, mfe } = calcMAEMFE({ entryDate, exitDate, entryPrice, kind, mae: undefined, mfe: undefined });
+  const holdDays = calcHoldDays(entryDate, exitDate);
+  const bar = guest.all_dates?.find(d => d.date === exitDate);
+  return { mae, mfe, holdDays, exitBarHigh: bar?.high ?? bar?.close ?? 0, exitBarLow: bar?.low ?? bar?.close ?? 0 };
+}
+
+/** buy→sell / short→cover をペアリング（全銘柄対象） */
 function buildTradePairs() {
-  const sym = currentSymbol?.replace(/\.T$/, '') || '';
-  const symTrades = guest.trades.filter(t =>
-    !t.symbol || t.symbol.replace(/\.T$/, '') === sym
-  );
   const pairs = [];
   const longStack  = [];
   const shortStack = [];
-  for (const t of symTrades) {
+  for (const t of guest.trades) {
     if (t.type === 'buy') {
       longStack.push({ ...t });
     } else if (t.type === 'sell' && t.realizedPnl !== undefined) {
       const entry = longStack.pop();
-      if (entry) pairs.push({ kind: 'long',  entryDate: entry.date, exitDate: t.date, entryPrice: entry.price, exitPrice: t.price, shares: t.shares, realizedPnl: t.realizedPnl });
+      if (entry) pairs.push({
+        kind: 'long', entryDate: entry.date, exitDate: t.date,
+        entryPrice: entry.price, exitPrice: t.price, shares: t.shares,
+        realizedPnl: t.realizedPnl, symbol: t.symbol,
+        mae: t.mae, mfe: t.mfe, holdDays: t.holdDays,
+        exitBarHigh: t.exitBarHigh, exitBarLow: t.exitBarLow,
+        round: t.round, sessionId: t.sessionId,
+      });
     } else if (t.type === 'short') {
       shortStack.push({ ...t });
     } else if (t.type === 'cover' && t.realizedPnl !== undefined) {
       const entry = shortStack.pop();
-      if (entry) pairs.push({ kind: 'short', entryDate: entry.date, exitDate: t.date, entryPrice: entry.price, exitPrice: t.price, shares: t.shares, realizedPnl: t.realizedPnl });
+      if (entry) pairs.push({
+        kind: 'short', entryDate: entry.date, exitDate: t.date,
+        entryPrice: entry.price, exitPrice: t.price, shares: t.shares,
+        realizedPnl: t.realizedPnl, symbol: t.symbol,
+        mae: t.mae, mfe: t.mfe, holdDays: t.holdDays,
+        exitBarHigh: t.exitBarHigh, exitBarLow: t.exitBarLow,
+        round: t.round, sessionId: t.sessionId,
+      });
     }
   }
   return pairs.sort((a, b) => a.exitDate < b.exitDate ? -1 : a.exitDate > b.exitDate ? 1 : 0);
@@ -2803,6 +2829,7 @@ function calcHoldDays(entryDate, exitDate) {
 
 /** MAE（最大逆行幅%）/ MFE（最大順行幅%）を計算 */
 function calcMAEMFE(pair) {
+  if (pair.mae !== undefined && pair.mfe !== undefined) return { mae: pair.mae, mfe: pair.mfe };
   if (!guest.all_dates || !guest.all_dates.length) return { mae: 0, mfe: 0 };
   const bars = guest.all_dates.filter(d => d.date >= pair.entryDate && d.date <= pair.exitDate);
   if (!bars.length) return { mae: 0, mfe: 0 };
@@ -2841,7 +2868,7 @@ function renderAnalysisStats(pairs) {
   const totalPnl = closed.reduce((s, p) => s + p.realizedPnl, 0);
   const avgWin   = wins.length   ? wins.reduce((s, p) => s + p.realizedPnl, 0) / wins.length   : null;
   const avgLoss  = losses.length ? losses.reduce((s, p) => s + p.realizedPnl, 0) / losses.length : null;
-  const avgHold  = closed.length ? closed.reduce((s, p) => s + calcHoldDays(p.entryDate, p.exitDate), 0) / closed.length : null;
+  const avgHold  = closed.length ? closed.reduce((s, p) => s + (p.holdDays ?? calcHoldDays(p.entryDate, p.exitDate)), 0) / closed.length : null;
   const maxDD    = calcMaxDrawdown();
 
   const set = (id, text, color) => { const el = document.getElementById(id); el.textContent = text; if (color) el.style.color = color; };
@@ -2870,7 +2897,7 @@ function renderAnalysisStats(pairs) {
 /** 保有日数 vs 実現損益 散布図 */
 function renderHoldPnlScatter(pairs) {
   const closed = pairs.filter(p => p.realizedPnl !== undefined);
-  const toPoint = p => ({ x: calcHoldDays(p.entryDate, p.exitDate), y: +(p.realizedPnl / 10000).toFixed(2), raw: p.realizedPnl });
+  const toPoint = p => ({ x: p.holdDays ?? calcHoldDays(p.entryDate, p.exitDate), y: +(p.realizedPnl / 10000).toFixed(2), raw: p.realizedPnl });
   const wins   = closed.filter(p => p.realizedPnl >= 0).map(toPoint);
   const losses = closed.filter(p => p.realizedPnl <  0).map(toPoint);
 
@@ -2974,7 +3001,7 @@ function renderTradeHistoryTable(pairs) {
     return;
   }
   tbody.innerHTML = closed.map(p => {
-    const hold   = calcHoldDays(p.entryDate, p.exitDate);
+    const hold   = p.holdDays ?? calcHoldDays(p.entryDate, p.exitDate);
     const pnlCls = p.realizedPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
     const kind   = p.kind === 'long' ? '買' : '空売';
     return `<tr>
@@ -3003,10 +3030,9 @@ function calcPrayerScore(lossPairs) {
 function calcPanicScore(lossPairs) {
   if (!lossPairs.length) return null;
   const scores = lossPairs.map(p => {
-    if (!guest.all_dates) return 50;
-    const bar = guest.all_dates.find(d => d.date === p.exitDate);
-    if (!bar) return 50;
-    const hi = bar.high ?? bar.close, lo = bar.low ?? bar.close;
+    const hi = p.exitBarHigh || (() => { const bar = guest.all_dates?.find(d => d.date === p.exitDate); return bar?.high ?? bar?.close; })();
+    const lo = p.exitBarLow  || (() => { const bar = guest.all_dates?.find(d => d.date === p.exitDate); return bar?.low  ?? bar?.close; })();
+    if (!hi || !lo) return 50;
     if (hi === lo) return 50;
     if (p.kind === 'long') {
       const pos = (p.exitPrice - lo) / (hi - lo); // 0=底値, 1=高値
@@ -3093,9 +3119,9 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
 
   // ② 保有期間：損失 vs 利益
   const avgWinHold  = winPairs.length
-    ? winPairs.reduce((s, p) => s + calcHoldDays(p.entryDate, p.exitDate), 0) / winPairs.length  : 0;
+    ? winPairs.reduce((s, p) => s + (p.holdDays ?? calcHoldDays(p.entryDate, p.exitDate)), 0) / winPairs.length  : 0;
   const avgLossHold = lossPairs.length
-    ? lossPairs.reduce((s, p) => s + calcHoldDays(p.entryDate, p.exitDate), 0) / lossPairs.length : 0;
+    ? lossPairs.reduce((s, p) => s + (p.holdDays ?? calcHoldDays(p.entryDate, p.exitDate)), 0) / lossPairs.length : 0;
 
   // ④ リベンジトレード件数
   let revengeCount = 0;
