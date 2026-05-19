@@ -67,6 +67,11 @@
       </div>
 
       <div id="candleView" class="view-panel">
+        <div class="timeframe-tabs">
+          <button class="tf-tab active" data-tf="daily">日足</button>
+          <button class="tf-tab" data-tf="weekly">週足</button>
+          <button class="tf-tab" data-tf="monthly">月足</button>
+        </div>
         <div class="symbol-bar">
           <h2 id="currentSymbol">-</h2>
           <span id="currentDate" class="date-label"></span>
@@ -226,11 +231,25 @@
               </div>
             </div>
             <div class="settings-section" style="margin-top:14px">
-              <div class="settings-section-title">表示本数</div>
+              <div class="settings-section-title">初期表示本数</div>
               <div class="settings-row">
-                <label style="flex:1">初期表示本数</label>
+                <label style="flex:1;font-size:12px">日足</label>
                 <input type="number" id="defaultBarsInput" min="10" max="1000" step="10" style="width:70px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-size:12px;">
                 <span style="font-size:11px;color:var(--text2);margin-left:4px">本</span>
+              </div>
+              <div class="settings-row">
+                <label style="flex:1;font-size:12px">週足</label>
+                <input type="number" id="defaultBarsWeeklyInput" min="10" max="500" step="5" style="width:70px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-size:12px;">
+                <span style="font-size:11px;color:var(--text2);margin-left:4px">本</span>
+              </div>
+              <div class="settings-row">
+                <label style="flex:1;font-size:12px">月足</label>
+                <input type="number" id="defaultBarsMonthlyInput" min="6" max="200" step="6" style="width:70px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-size:12px;">
+                <span style="font-size:11px;color:var(--text2);margin-left:4px">本</span>
+              </div>
+              <div class="settings-row" style="margin-top:6px">
+                <button id="applyDefaultBarsBtn" class="btn-outline" style="font-size:12px;padding:3px 14px">設定</button>
+                <span id="defaultBarsAppliedMsg" style="font-size:11px;color:var(--accent);margin-left:8px;opacity:0;transition:opacity 0.4s"></span>
               </div>
             </div>
             <button id="resetColorsBtn" class="btn-outline" style="margin-top:14px">デフォルトに戻す</button>

@@ -56,13 +56,17 @@ app.whenReady().then(() => {
     });
   }
 
-  // DB初期化（起動時に一度だけ）
+  // DB初期化（スキーマのみ先に実行）
   const { getDb, initSymbolStats } = require('../src/db');
   getDb();
 
-  initSymbolStats();
-
+  // ウィンドウを先に作成してUIをすぐ表示
   createWindow();
+
+  // symbol_stats の集計はウィンドウ表示後にバックグラウンドで実行
+  setImmediate(() => {
+    try { initSymbolStats(); } catch (e) { console.error('[initSymbolStats]', e); }
+  });
 
   // IPC ハンドラー登録
   require('./ipc/stocks').register(ipcMain);

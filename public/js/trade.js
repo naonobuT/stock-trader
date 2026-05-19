@@ -29,6 +29,7 @@ const COMP_COLORS = [
   { border: '#a78bfa', bg: 'rgba(167,139,250,0.08)' },
 ];
 let currentCandles = [];
+let currentTimeframe = 'daily'; // 'daily' | 'weekly' | 'monthly'
 let syncingRange = false;
 let blindMode = false;
 let blindDayCount = 0;
@@ -84,6 +85,13 @@ function syncSettingsInputs() {
   document.getElementById('showBB3').checked  = indicatorSettings.showBB3;
   document.getElementById('showRSI').checked  = indicatorSettings.showRSI;
   document.getElementById('showMACD').checked = indicatorSettings.showMACD;
+  // 表示本数
+  const elD = document.getElementById('defaultBarsInput');
+  const elW = document.getElementById('defaultBarsWeeklyInput');
+  const elM = document.getElementById('defaultBarsMonthlyInput');
+  if (elD) elD.value = defaultBars;
+  if (elW) elW.value = defaultBarsWeekly;
+  if (elM) elM.value = defaultBarsMonthly;
 }
 
 function loadChartColors() {
@@ -122,18 +130,57 @@ function saveKeyboardShortcuts() {
   localStorage.setItem('keyboardShortcuts', JSON.stringify(keyboardShortcuts));
 }
 
-let defaultBars = 120;
+let defaultBars        = 120;
+let defaultBarsWeekly  = 60;
+let defaultBarsMonthly = 24;
 
 function loadDefaultBars() {
   const saved = localStorage.getItem('defaultBars');
   if (saved) defaultBars = Math.max(10, Math.min(1000, parseInt(saved)));
-  const el = document.getElementById('defaultBarsInput');
-  if (el) el.value = defaultBars;
+  const savedW = localStorage.getItem('defaultBarsWeekly');
+  if (savedW) defaultBarsWeekly = Math.max(10, Math.min(500, parseInt(savedW)));
+  const savedM = localStorage.getItem('defaultBarsMonthly');
+  if (savedM) defaultBarsMonthly = Math.max(6, Math.min(200, parseInt(savedM)));
+
+  const el  = document.getElementById('defaultBarsInput');
+  const elW = document.getElementById('defaultBarsWeeklyInput');
+  const elM = document.getElementById('defaultBarsMonthlyInput');
+  if (el)  el.value  = defaultBars;
+  if (elW) elW.value = defaultBarsWeekly;
+  if (elM) elM.value = defaultBarsMonthly;
 }
 
 function saveDefaultBars(val) {
   defaultBars = Math.max(10, Math.min(1000, parseInt(val)));
   localStorage.setItem('defaultBars', defaultBars);
+}
+
+function saveDefaultBarsWeekly(val) {
+  defaultBarsWeekly = Math.max(10, Math.min(500, parseInt(val)));
+  localStorage.setItem('defaultBarsWeekly', defaultBarsWeekly);
+}
+
+function saveDefaultBarsMonthly(val) {
+  defaultBarsMonthly = Math.max(6, Math.min(200, parseInt(val)));
+  localStorage.setItem('defaultBarsMonthly', defaultBarsMonthly);
+}
+
+/** 現在の時間足に対応する defaultBars を返す */
+function getDefaultBars() {
+  if (currentTimeframe === 'weekly')  return defaultBarsWeekly;
+  if (currentTimeframe === 'monthly') return defaultBarsMonthly;
+  return defaultBars;
+}
+
+/** 現在のタイムフレームの defaultBars を即座にチャートへ適用する */
+function applyDefaultBarsNow() {
+  if (!currentCandles.length) return;
+  const bars = getDefaultBars();
+  const slider = document.getElementById('rangeSlider');
+  slider.max = Math.max(bars, currentCandles.length);
+  slider.value = bars;
+  document.getElementById('rangeLabel').textContent = `${bars}本表示`;
+  applySliderToChart(bars);
 }
 
 function eventToKeyString(e) {
@@ -632,6 +679,10 @@ async function applyNewStock(symbol, errEl, prefetchedCandles = null, symbolName
   stopAutoAdvance();
   currentSymbol = symbol;
   gameActive = true;
+  // 銘柄切替時は時間足を日足にリセット・ズームもリセット
+  currentTimeframe = 'daily';
+  userZoomSet = false;
+  document.querySelectorAll('.tf-tab').forEach(b => b.classList.toggle('active', b.dataset.tf === 'daily'));
   document.getElementById('nextDayBtn').disabled = false;
   document.getElementById('autoAdvanceBtn').disabled = false;
   const displayName = symbolName
@@ -1334,10 +1385,58 @@ function updateSliderFromRange(range) {
 function applySliderToChart(bars) {
   if (!lwChart || !currentCandles.length || bars <= 0) return;
   const total = currentCandles.length;
-  const from = total - bars;
-  lwChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, from), to: total - 1 });
+  const from = total - bars; // 負値可：左側に空白を作ることで足の幅を一定に保つ
+  lwChart.timeScale().setVisibleLogicalRange({ from, to: total - 1 });
   // 価格スケールを表示中の足に合わせて自動調整
   lwChart.priceScale('right').applyOptions({ autoScale: true });
+}
+
+/** 日足データを週足に集計 */
+function aggregateWeekly(daily) {
+  const groups = {};
+  for (const c of daily) {
+    // ISO週の月曜日をキーにする
+    const d = new Date(c.time);
+    const day = d.getDay(); // 0=Sun,1=Mon...
+    const diff = (day === 0 ? -6 : 1 - day);
+    const mon = new Date(d);
+    mon.setDate(d.getDate() + diff);
+    const key = mon.toISOString().slice(0, 10);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(c);
+  }
+  return Object.keys(groups).sort().map(key => {
+    const bars = groups[key];
+    return {
+      time:   key,
+      open:   bars[0].open,
+      high:   Math.max(...bars.map(b => b.high)),
+      low:    Math.min(...bars.map(b => b.low)),
+      close:  bars[bars.length - 1].close,
+      volume: bars.reduce((s, b) => s + (b.volume || 0), 0),
+    };
+  });
+}
+
+/** 日足データを月足に集計 */
+function aggregateMonthly(daily) {
+  const groups = {};
+  for (const c of daily) {
+    const key = c.time.slice(0, 7) + '-01';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(c);
+  }
+  return Object.keys(groups).sort().map(key => {
+    const bars = groups[key];
+    return {
+      time:   key,
+      open:   bars[0].open,
+      high:   Math.max(...bars.map(b => b.high)),
+      low:    Math.min(...bars.map(b => b.low)),
+      close:  bars[bars.length - 1].close,
+      volume: bars.reduce((s, b) => s + (b.volume || 0), 0),
+    };
+  });
 }
 
 async function refreshChart() {
@@ -1346,7 +1445,7 @@ async function refreshChart() {
   const historyFrom = Math.max(0, guest.start_idx - 200);
   const validRaw = guest.all_dates.slice(historyFrom, guest.current_idx + 1).filter(c => c.close);
 
-  currentCandles = validRaw.map(c => ({
+  const dailyCandles = validRaw.map(c => ({
     time: c.date,
     open: c.open ?? c.close,
     high: c.high ?? c.close,
@@ -1354,6 +1453,15 @@ async function refreshChart() {
     close: c.close,
     volume: c.volume,
   }));
+
+  // タイムフレームに応じて集計
+  if (currentTimeframe === 'weekly') {
+    currentCandles = aggregateWeekly(dailyCandles);
+  } else if (currentTimeframe === 'monthly') {
+    currentCandles = aggregateMonthly(dailyCandles);
+  } else {
+    currentCandles = dailyCandles;
+  }
 
   if (!currentCandles.length) return;
 
@@ -1382,13 +1490,14 @@ async function refreshChart() {
   setTradeMarkers();
 
   const slider = document.getElementById('rangeSlider');
-  slider.max = Math.max(10, currentCandles.length);
+  // 設定本数より多くてもスライダーで調整できるよう、データ数と設定本数の大きい方をmaxにする
+  slider.max = Math.max(getDefaultBars(), currentCandles.length);
 
   let viewBars;
   if (userZoomSet) {
-    viewBars = Math.min(parseInt(slider.max), parseInt(slider.value));
+    viewBars = parseInt(slider.value); // データ数を超えても許容（左空白で幅を保つ）
   } else {
-    viewBars = Math.min(parseInt(slider.max), defaultBars);
+    viewBars = getDefaultBars();
     userZoomSet = true;
   }
   slider.value = viewBars;
@@ -1408,15 +1517,35 @@ const TRADE_MARKER = {
 
 function setTradeMarkers() {
   if (!tradeMarkersPlugin || !currentSymbol) return;
+
+  // 週足/月足では trade の daily date → 対応する足の time にマッピング
+  function mapDateToTf(dateStr) {
+    if (currentTimeframe === 'weekly') {
+      const d = new Date(dateStr);
+      const day = d.getUTCDay(); // 0=Sun
+      const diff = (day === 0) ? -6 : 1 - day; // 月曜日に寄せる
+      d.setUTCDate(d.getUTCDate() + diff);
+      return d.toISOString().slice(0, 10);
+    } else if (currentTimeframe === 'monthly') {
+      return dateStr.slice(0, 7) + '-01';
+    }
+    return dateStr;
+  }
+
+  // currentCandles に存在する time セットを作成（マーカーが存在しない足に設定するとエラーになる場合を防ぐ）
+  const validTimes = new Set(currentCandles.map(c => c.time));
+
   const toMarker = t => {
     const m = TRADE_MARKER[t.type] || TRADE_MARKER.buy;
-    return { time: t.date, position: m.position, color: m.color, shape: m.shape, text: `${m.label} ${t.shares}株@${fmt(t.price)}円` };
+    const time = mapDateToTf(t.date);
+    return { time, position: m.position, color: m.color, shape: m.shape, text: `${m.label} ${t.shares}株@${fmt(t.price)}円` };
   };
   const sym = currentSymbol.replace(/\.T$/, '');
   const filtered = guest.trades
     .filter(t =>
       (!t.symbol || t.symbol.replace(/\.T$/, '') === sym) &&
-      (!roundMode || (t.round === currentRound && t.sessionId === currentSessionId))
+      (!roundMode || (t.round === currentRound && t.sessionId === currentSessionId)) &&
+      validTimes.has(mapDateToTf(t.date))
     )
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   try { tradeMarkersPlugin.setMarkers(filtered.map(toMarker)); } catch (e) { console.warn('[markers]', e.message); }
@@ -2200,8 +2329,17 @@ function setupEvents() {
     });
   });
 
-  document.getElementById('defaultBarsInput').addEventListener('change', (e) => {
-    saveDefaultBars(e.target.value);
+  document.getElementById('applyDefaultBarsBtn').addEventListener('click', () => {
+    saveDefaultBars(document.getElementById('defaultBarsInput').value);
+    saveDefaultBarsWeekly(document.getElementById('defaultBarsWeeklyInput').value);
+    saveDefaultBarsMonthly(document.getElementById('defaultBarsMonthlyInput').value);
+    // 現在のタイムフレームに即反映
+    applyDefaultBarsNow();
+    // 確定メッセージを一瞬表示
+    const msg = document.getElementById('defaultBarsAppliedMsg');
+    msg.textContent = '✔ 保存しました';
+    msg.style.opacity = '1';
+    setTimeout(() => { msg.style.opacity = '0'; }, 1500);
   });
 
   document.getElementById('resetColorsBtn').addEventListener('click', () => {
@@ -2386,6 +2524,18 @@ function setupEvents() {
     searchResults = [];
     changeToSymbol(result.symbol, result.name, result.oldName);
   }
+
+  // --- 時間足タブ (日足 / 週足 / 月足) ---
+  document.querySelectorAll('.tf-tab').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.tf === currentTimeframe) return; // 変化なし
+      document.querySelectorAll('.tf-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentTimeframe = btn.dataset.tf;
+      userZoomSet = false; // タイムフレーム切替時は defaultBars で再描画
+      if (gameActive) await refreshChart();
+    });
+  });
 }
 
 init();

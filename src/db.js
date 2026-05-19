@@ -119,6 +119,16 @@ function initSchema() {
 
 function initSymbolStats() {
   const db = getDb();
+
+  // price_cache の行数を取得
+  const { total } = db.prepare('SELECT COUNT(*) as total FROM price_cache').get();
+  if (total === 0) return; // データなし
+
+  // 前回の集計時の合計行数と比べて変化がなければスキップ
+  const { cached } = db.prepare('SELECT SUM(row_count) as cached FROM symbol_stats').get();
+  if (cached && cached === total) return; // 変化なし
+
+  // 差分がある場合のみ全件再集計
   db.prepare('DELETE FROM symbol_stats').run();
   db.prepare(`
     INSERT INTO symbol_stats (symbol, row_count, from_date, to_date, updated_at)

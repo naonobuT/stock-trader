@@ -2,3 +2,9 @@ node_modules/
 *.db
 *.db-shm
 *.db-wal
+.env
+dist/
+.claude/
+.clone/
+stockdata/
+scripts/
