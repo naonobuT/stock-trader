@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>株式投資ゲーム</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="css/style.css">
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
@@ -28,6 +28,7 @@
       <button id="roundModeBtn" class="btn-outline-sm" title="同じ銘柄を3回プレイして損切りクセを診断">🎯 3Rモード</button>
       <div id="roundIndicator" class="round-indicator" style="display:none">
         Round <span id="roundNumDisplay">1</span>/3
+        <button id="finishRoundBtn" class="btn-round-finish" style="display:none" title="このラウンドを終了して次へ進む">✔ ラウンド終了</button>
         <button id="nextRoundBtn" class="btn-round-next" style="display:none">次のラウンドへ →</button>
         <button id="endRoundModeBtn" class="btn-round-end">×</button>
       </div>
@@ -131,6 +132,13 @@
             <div class="analysis-section-title">🎯 3ラウンド比較</div>
             <div id="roundCompareContent"></div>
           </div>
+          <!-- 刺激→反応分析（3Rモード時） -->
+          <div id="chartBehaviorSection" style="display:none" class="analysis-section">
+            <div class="analysis-section-title">🔬 株のクセ × あなたの反応</div>
+            <div id="chartProfileContent"></div>
+            <div id="eventResponseContent"></div>
+            <div id="habitConclusionContent"></div>
+          </div>
           <!-- 散布図 2列 -->
           <div class="analysis-charts-row">
             <div class="analysis-chart-box">
@@ -147,7 +155,7 @@
           <!-- シーケンス分析 -->
           <div class="analysis-section">
             <div class="analysis-section-title">🎲 シーケンス分析（リベンジトレード検知）</div>
-            <div id="sequenceAnalysis"></div>
+            <div id="sequenceAnalysis" style="max-height:240px;overflow-y:auto;"></div>
           </div>
           <!-- トレード履歴 -->
           <div class="analysis-section">
@@ -239,7 +247,6 @@
               <div class="data-left">
                 <div class="settings-section-title" style="margin-top:14px">銘柄リスト更新（JPX）</div>
             <p class="data-hint"><a href="https://www.jpx.co.jp/markets/statistics-equities/misc/01.html" target="_blank" rel="noopener">JPX（上場銘柄一覧）</a>からXLS/XLSXをダウンロードし、ここで取り込むと銘柄リストが最新化される。新規上場・名称変更・上場廃止が自動反映される。</p>
-            <input type="file" id="symbolsXlsPicker" accept=".xls,.xlsx" style="display:none">
             <div class="import-row">
               <button id="symbolsXlsSelectBtn" class="btn-folder-select">📄 XLSファイルを選択</button>
               <span id="symbolsXlsName" class="selected-folder-name">未選択</span>
@@ -249,7 +256,6 @@
             <div class="settings-section-title" style="margin-top:14px">CSVデータ取込</div>
             <p class="data-hint">株価CSVが入ったフォルダを選択してください。<br>ファイル名が銘柄コードとして取り込まれます。</p>
             <div class="format-row"><label class="format-label">データ形式</label><select id="formatSelect" class="format-select"></select></div>
-            <input type="file" id="folderPicker" webkitdirectory multiple accept=".csv" style="display:none">
             <div class="import-row">
               <button id="folderSelectBtn" class="btn-folder-select">📁 フォルダを選択</button>
               <span id="selectedFolderName" class="selected-folder-name">未選択</span>
@@ -286,6 +292,10 @@
               <input type="date" id="jqAutoTo" class="yahoo-date-input">
             </div>
             <div class="yahoo-auto-row">
+              <div class="yahoo-auto-btn-group">
+                <button id="jqGapFillBtn" class="btn-yahoo-auto" style="background:rgba(16,185,129,0.15);border-color:#10b981;color:#10b981">📦 ギャップ補完</button>
+                <span class="yahoo-auto-desc">各銘柄の最終日〜今日の欠損期間をJ-Quantsで補完</span>
+              </div>
               <div class="yahoo-auto-btn-group">
                 <button id="jqUpdateBtn" class="btn-yahoo-auto">既存銘柄を最新化</button>
                 <span class="yahoo-auto-desc">DBにある全銘柄の最終日〜終了日を補完</span>
@@ -536,6 +546,6 @@
   </main>
 
   <div id="forceCloseToast" class="force-close-toast hidden"></div>
-  <script src="/js/trade.js"></script>
+  <script src="js/trade.js"></script>
 </body>
 </html>

@@ -26,6 +26,7 @@
     "electron": "^29.4.6",
     "electron-builder": "^24.13.3",
     "electron-rebuild": "^3.2.9",
+    "electron-reload": "^2.0.0-alpha.1",
     "nodemon": "^3.0.3",
     "xlsx": "^0.18.5"
   },
@@ -33,6 +34,7 @@
     "appId": "com.stocktrader.app",
     "productName": "株式投資ゲーム",
     "copyright": "Copyright © 2025",
+    "electronDist": "node_modules/electron/dist",
     "win": {
       "target": [
         {

@@ -1082,6 +1082,17 @@ header {
   color: var(--accent);
   font-weight: 600;
 }
+.btn-round-finish {
+  padding: 2px 8px;
+  background: #059669;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+.btn-round-finish:hover { opacity: 0.85; }
 .btn-round-next {
   padding: 2px 8px;
   background: var(--accent);
@@ -1103,6 +1114,39 @@ header {
   line-height: 1;
 }
 .btn-round-end:hover { color: var(--down); }
+
+/* ===== カスタムツールチップ ===== */
+[data-tooltip] {
+  position: relative;
+  cursor: default;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  white-space: pre-wrap;
+  max-width: 260px;
+  width: max-content;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  text-align: left;
+}
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.6s;
+}
 
 /* ===== スコアカード ===== */
 .score-cards-row {
@@ -1189,3 +1233,76 @@ header {
   margin-bottom: 4px;
 }
 .next-goal-box .goal-item::before { content: "✓ "; color: #22c55e; }
+
+/* ===== 刺激→反応分析（3Rモード） ===== */
+.chart-profile-row {
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 10px;
+}
+.chart-profile-tag {
+  display: inline-block;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 3px;
+  padding: 1px 7px;
+  font-size: 10px;
+  color: var(--accent);
+  margin: 0 3px;
+}
+.event-matrix-wrap {
+  overflow-x: auto;
+  margin-bottom: 4px;
+}
+.event-group-header {
+  background: rgba(255,255,255,0.03);
+  color: var(--text2);
+  font-size: 10px;
+  padding: 3px 8px !important;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.badge-full {
+  display: inline-block;
+  background: rgba(245,158,11,0.15);
+  border: 1px solid rgba(245,158,11,0.4);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: #f59e0b;
+  font-weight: 600;
+}
+.badge-partial {
+  display: inline-block;
+  background: rgba(107,114,128,0.12);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: var(--text2);
+}
+.habit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.habit-evlabel {
+  flex: 0 0 160px;
+  color: var(--text);
+}
+.habit-arrow {
+  color: var(--text2);
+  flex-shrink: 0;
+}
+.habit-resp {
+  flex: 0 0 110px;
+  font-weight: 700;
+}
+.habit-badge {
+  font-size: 11px;
+  flex-shrink: 0;
+}

@@ -293,6 +293,11 @@ async function init() {
 
   if (guest.trades.length > 0) renderPnl();
 
+  // ソフトリロード後に3Rセッションが残っていれば UI を復元
+  if (restoreRoundSession()) {
+    updateRoundUI();
+  }
+
   _startPrefetch();
   showStartModal();
 }
@@ -303,9 +308,7 @@ let _prefetchedStock = null;
 
 async function _prefetchRandomStock() {
   try {
-    const r = await fetch('/api/stocks/random-with-candles');
-    if (!r.ok) return null;
-    return await r.json();
+    return await window.api.invoke('stocks:random-with-candles');
   } catch {
     return null;
   }
@@ -353,9 +356,9 @@ async function startGame() {
     ({ symbol, name, oldName, candles: prefetchedCandles } = _prefetchedStock);
     _prefetchedStock = null;
   } else {
-    const r = await fetch('/api/stocks/random');
-    if (!r.ok) { msgEl.textContent = 'データ取得失敗'; msgEl.className = 'msg error'; return; }
-    ({ symbol, name, oldName } = await r.json());
+    try {
+      ({ symbol, name, oldName } = await window.api.invoke('stocks:random'));
+    } catch { msgEl.textContent = 'データ取得失敗'; msgEl.className = 'msg error'; return; }
     prefetchedCandles = null;
   }
 
@@ -373,9 +376,7 @@ async function changeToSymbol(symbol, name = null, oldName = null) {
   btn.textContent = '読込中...';
   btn.disabled = true;
   try {
-    const r = await fetch(`/api/stocks/candles/${encodeURIComponent(symbol)}?limit=1000`);
-    if (!r.ok) return;
-    const candles = await r.json();
+    const candles = await window.api.invoke('stocks:candles', { symbol, limit: 1000 });
     await applyNewStock(symbol, null, candles, name, oldName);
   } finally {
     isChangingStock = false;
@@ -398,9 +399,7 @@ async function changeStock() {
       ({ symbol, name, oldName, candles } = _prefetchedStock);
       _prefetchedStock = null;
     } else {
-      const r = await fetch('/api/stocks/random-with-candles');
-      if (!r.ok) return;
-      ({ symbol, name, oldName, candles } = await r.json());
+      ({ symbol, name, oldName, candles } = await window.api.invoke('stocks:random-with-candles'));
     }
     await applyNewStock(symbol, null, candles, name, oldName);
     _startPrefetch();
@@ -409,6 +408,41 @@ async function changeStock() {
     btn.textContent = '🎲 銘柄変更[N]';
     btn.disabled = false;
   }
+}
+
+// ===== 3ラウンドセッションの永続化（ソフトリロード対策） =====
+// ローソク足配列は大きいので保存せず、シンボル・名前・開始Idxのみ保存する
+function saveRoundSession() {
+  if (!roundMode) return;
+  try {
+    sessionStorage.setItem('roundSession', JSON.stringify({
+      roundMode, currentRound, currentSessionId, roundComplete,
+      roundSessionSymbol, roundSessionName, roundSessionStartIdx,
+    }));
+  } catch (_) {}
+}
+
+function restoreRoundSession() {
+  try {
+    const raw = sessionStorage.getItem('roundSession');
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s.roundMode || !s.roundSessionSymbol) return false;
+    roundMode            = s.roundMode;
+    currentRound         = s.currentRound;
+    currentSessionId     = s.currentSessionId;
+    roundComplete        = s.roundComplete;
+    roundSessionSymbol   = s.roundSessionSymbol;
+    roundSessionName     = s.roundSessionName;
+    roundSessionStartIdx = s.roundSessionStartIdx;
+    // roundSessionCandles はここでは復元しない（nextRound で IPC 再フェッチ）
+    console.log('[restoreRoundSession] restored:', roundSessionSymbol, 'round:', currentRound);
+    return true;
+  } catch (_) { return false; }
+}
+
+function clearRoundSession() {
+  try { sessionStorage.removeItem('roundSession'); } catch (_) {}
 }
 
 // ===== 3ラウンドモード関数 =====
@@ -425,15 +459,22 @@ async function startRoundMode() {
   // 新しいランダム銘柄でスタート
   isChangingStock = true;
   try {
-    const r = await fetch('/api/stocks/random-with-candles');
-    if (!r.ok) { roundMode = false; return; }
-    const { symbol, name, oldName, candles } = await r.json();
+    let symbol, name, oldName, candles;
+    try {
+      ({ symbol, name, oldName, candles } = await window.api.invoke('stocks:random-with-candles'));
+    } catch (err) {
+      console.error('[startRoundMode] IPC failed:', err);
+      alert(`銘柄データの取得に失敗しました: ${err.message ?? err}\nデータ管理からCSVをインポートしてください。`);
+      roundMode = false; clearRoundSession(); return;
+    }
     roundSessionSymbol  = symbol;
     roundSessionName    = name;
     roundSessionCandles = candles;
     guest.cash = INITIAL_CASH;
     await applyNewStock(symbol, null, candles, name, oldName);
     roundSessionStartIdx = guest.start_idx;
+    saveRoundSession();
+    console.log('[startRoundMode] session set:', symbol, 'candles:', candles?.length, 'startIdx:', roundSessionStartIdx);
   } finally {
     isChangingStock = false;
   }
@@ -441,8 +482,37 @@ async function startRoundMode() {
   updateRoundUI();
 }
 
+/** 現ラウンドを手動終了してラウンド完了状態にする */
+function finishCurrentRound() {
+  if (!roundMode || roundComplete) return;
+  stopAutoAdvance();
+  roundComplete = true;
+  saveRoundSession();
+  updateRoundUI();
+}
+
 async function nextRound() {
   if (!roundMode || currentRound >= 3) return;
+  // セッションデータが揃っているか確認（ソフトリロード後の復元を試みる）
+  if (!roundSessionSymbol) {
+    console.warn('[nextRound] symbol missing, trying sessionStorage restore...');
+    if (!restoreRoundSession() || !roundSessionSymbol) {
+      alert('ラウンドセッションデータが見つかりません。3Rモードを再起動してください。');
+      endRoundMode();
+      return;
+    }
+  }
+  // ローソク足がない場合（ソフトリロード後など）は IPC で再フェッチ
+  if (!roundSessionCandles) {
+    console.warn('[nextRound] candles missing, re-fetching from IPC...');
+    try {
+      roundSessionCandles = await window.api.invoke('stocks:candles', { symbol: roundSessionSymbol, limit: 1000 });
+    } catch (err) {
+      alert(`ローソク足データの再取得に失敗しました: ${err.message ?? err}`);
+      endRoundMode();
+      return;
+    }
+  }
   currentRound++;
   roundComplete = false;
   // 同一銘柄・同一開始インデックスでリプレイ
@@ -450,6 +520,11 @@ async function nextRound() {
   isChangingStock = true;
   try {
     await applyNewStock(roundSessionSymbol, null, roundSessionCandles, roundSessionName, null, roundSessionStartIdx);
+  } catch (err) {
+    console.error('[nextRound] applyNewStock failed:', err);
+    alert(`ラウンド${currentRound}の開始に失敗しました: ${err.message ?? err}`);
+    endRoundMode();
+    return;
   } finally {
     isChangingStock = false;
   }
@@ -466,6 +541,7 @@ function endRoundMode() {
   roundSessionStartIdx = null;
   roundSessionCandles  = null;
   roundSessionName    = null;
+  clearRoundSession();
   // ラウンド比較チャートを破棄（通常モードのチャートで再作成させる）
   if (pnlChart?._roundMode)      { pnlChart.destroy();      pnlChart      = null; }
   if (pnlChartLarge?._roundMode) { pnlChartLarge.destroy(); pnlChartLarge = null; }
@@ -475,19 +551,24 @@ function endRoundMode() {
 }
 
 function updateRoundUI() {
-  const indicator = document.getElementById('roundIndicator');
-  const nextBtn   = document.getElementById('nextRoundBtn');
-  const modeBtn   = document.getElementById('roundModeBtn');
+  const indicator   = document.getElementById('roundIndicator');
+  const nextBtn     = document.getElementById('nextRoundBtn');
+  const finishBtn   = document.getElementById('finishRoundBtn');
+  const modeBtn     = document.getElementById('roundModeBtn');
   if (roundMode) {
     indicator.style.display = '';
     document.getElementById('roundNumDisplay').textContent = currentRound;
     const isDone = roundComplete && currentRound >= 3;
-    nextBtn.style.display = roundComplete ? '' : 'none';
-    nextBtn.textContent   = isDone ? '📊 分析を見る' : `ラウンド${currentRound + 1}へ →`;
+    // ラウンド完了前は「ラウンド終了」ボタンを表示、完了後は「次へ / 分析」ボタンを表示
+    finishBtn.style.display = roundComplete ? 'none' : '';
+    nextBtn.style.display   = roundComplete ? '' : 'none';
+    nextBtn.textContent     = isDone ? '📊 分析を見る' : `ラウンド${currentRound + 1}へ →`;
     modeBtn.style.display = 'none';
     document.getElementById('newGameBtn').style.display = 'none';
   } else {
     indicator.style.display = 'none';
+    nextBtn.style.display   = 'none';  // 念のため明示的に隠す
+    finishBtn.style.display = 'none';
     modeBtn.style.display   = '';
     document.getElementById('newGameBtn').style.display = '';
   }
@@ -515,9 +596,9 @@ async function applyNewStock(symbol, errEl, prefetchedCandles = null, symbolName
   let allData = prefetchedCandles;
   if (!allData) {
     if (errEl) { errEl.textContent = 'データ読み込み中...'; errEl.className = 'msg'; }
-    const r = await fetch(`/api/stocks/candles/${symbol}?limit=1000`);
-    if (!r.ok) { err('銘柄が見つかりません'); return false; }
-    allData = await r.json();
+    try {
+      allData = await window.api.invoke('stocks:candles', { symbol, limit: 1000 });
+    } catch { err('銘柄が見つかりません'); return false; }
   }
   if (allData.length < 10) { err('データが不足しています'); return false; }
 
@@ -666,6 +747,7 @@ async function _nextDayCore() {
     if (roundMode) {
       stopAutoAdvance();
       roundComplete = true;
+      saveRoundSession();
       updateRoundUI();
       return;
     }
@@ -2056,7 +2138,7 @@ function setBlindMode(on) {
   document.getElementById('currentDate').textContent =
     blindMode ? `${blindDayCount}日目` : blindActualDate;
   applyBlindChartOptions();
-  updatePortfolio();
+  refreshState();
 }
 
 // --- Events ---
@@ -2068,14 +2150,38 @@ function setupEvents() {
   document.getElementById('autoAdvanceBtn').addEventListener('click', toggleAutoAdvance);
   document.getElementById('roundModeBtn').addEventListener('click', async (e) => {
     e.currentTarget.blur();
-    await startRoundMode();
+    try {
+      await startRoundMode();
+    } catch (err) {
+      console.error('[roundModeBtn] startRoundMode threw:', err);
+      alert(`3Rモード開始エラー: ${err.message ?? err}`);
+    }
   });
   document.getElementById('endRoundModeBtn').addEventListener('click', (e) => {
     e.currentTarget.blur();
     endRoundMode();
   });
+  document.getElementById('finishRoundBtn').addEventListener('click', (e) => {
+    e.currentTarget.blur();
+    if (!roundMode && !restoreRoundSession()) {
+      updateRoundUI(); // stale なら非表示に
+      return;
+    }
+    finishCurrentRound();
+  });
   document.getElementById('nextRoundBtn').addEventListener('click', async (e) => {
     e.currentTarget.blur();
+    // roundMode が false のとき（UI が stale な場合）はセッション復元を試みる
+    if (!roundMode) {
+      if (!restoreRoundSession()) {
+        // 復元不可ならボタンを隠してクリーンアップ
+        document.getElementById('nextRoundBtn').style.display = 'none';
+        document.getElementById('roundIndicator').style.display = 'none';
+        document.getElementById('roundModeBtn').style.display = '';
+        document.getElementById('newGameBtn').style.display = '';
+        return;
+      }
+    }
     if (currentRound >= 3) { switchView('analysis'); }
     else { await nextRound(); }
   });
@@ -2248,8 +2354,7 @@ function setupEvents() {
 
   async function fetchSearchResults(q) {
     try {
-      const r = await fetch(`/api/stocks/search?q=${encodeURIComponent(q)}`);
-      searchResults = await r.json();
+      searchResults = await window.api.invoke('stocks:search', { q });
     } catch { searchResults = []; }
     searchActiveIdx = -1;
     renderSearchDropdown();
@@ -2323,8 +2428,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
 
   async function loadAdminStats() {
     try {
-      const r = await fetch('/api/admin/stats');
-      const data = await r.json();
+      const data = await window.api.invoke('admin:stats');
       document.getElementById('statSymbols').textContent = data.symbolCount.toLocaleString();
       document.getElementById('statRows').textContent = data.rowCount.toLocaleString();
       allSymbols = data.symbols;
@@ -2336,8 +2440,7 @@ document.querySelectorAll('.view-tab').forEach(tab => {
 
   async function loadFormats() {
     try {
-      const r = await fetch('/api/admin/formats');
-      const formats = await r.json();
+      const formats = await window.api.invoke('admin:formats');
       const sel = document.getElementById('formatSelect');
       sel.innerHTML = formats.map(f => `<option value="${f.id}">${f.label}</option>`).join('');
     } catch (e) {
@@ -2380,28 +2483,27 @@ document.querySelectorAll('.view-tab').forEach(tab => {
   const symbolsXlsName      = document.getElementById('symbolsXlsName');
   const symbolsXlsImportBtn = document.getElementById('symbolsXlsImportBtn');
   const symbolsXlsResult    = document.getElementById('symbolsXlsResult');
-  let selectedXlsFile = null;
+  let selectedXlsFilePath = null;
 
-  symbolsXlsSelectBtn.addEventListener('click', () => symbolsXlsPicker.click());
-
-  symbolsXlsPicker.addEventListener('change', () => {
-    selectedXlsFile = symbolsXlsPicker.files[0] || null;
-    symbolsXlsName.textContent = selectedXlsFile ? selectedXlsFile.name : '未選択';
-    symbolsXlsImportBtn.disabled = !selectedXlsFile;
+  // ネイティブファイルダイアログでXLSXを選択
+  symbolsXlsSelectBtn.addEventListener('click', async () => {
+    const result = await window.api.invoke('dialog:openFile', {
+      filters: [{ name: 'Excel', extensions: ['xls', 'xlsx'] }],
+    });
+    if (result.canceled || !result.filePaths.length) return;
+    selectedXlsFilePath = result.filePaths[0];
+    symbolsXlsName.textContent = selectedXlsFilePath.split(/[\\/]/).pop();
+    symbolsXlsImportBtn.disabled = false;
   });
 
   symbolsXlsImportBtn.addEventListener('click', async () => {
-    if (!selectedXlsFile) return;
+    if (!selectedXlsFilePath) return;
     symbolsXlsImportBtn.disabled = true;
     symbolsXlsImportBtn.textContent = '更新中...';
     symbolsXlsResult.className = 'import-result hidden';
 
     try {
-      const form = new FormData();
-      form.append('file', selectedXlsFile);
-      const res = await fetch('/api/admin/update-symbols', { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '不明なエラー');
+      const data = await window.api.invoke('admin:update-symbols', { filePath: selectedXlsFilePath });
       symbolsXlsResult.className = 'import-result success';
       symbolsXlsResult.textContent =
         `更新完了（計${data.total.toLocaleString()}銘柄）: 名称変更 ${data.updated} / 新規追加 ${data.newAdded} / 上場廃止 ${data.delisted} / 変更なし ${data.unchanged}`;
@@ -2416,30 +2518,22 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     }
   });
 
-  // フォルダ選択
-  const folderPicker = document.getElementById('folderPicker');
+  // フォルダ選択（ネイティブディレクトリダイアログ）
   const folderSelectBtn = document.getElementById('folderSelectBtn');
   const selectedFolderName = document.getElementById('selectedFolderName');
   const importBtn = document.getElementById('importBtn');
+  let selectedFolderPath = null;
 
-  folderSelectBtn.addEventListener('click', () => folderPicker.click());
-
-  folderPicker.addEventListener('change', () => {
-    const files = Array.from(folderPicker.files).filter(f => f.name.toUpperCase().endsWith('.CSV'));
-    if (files.length === 0) {
-      selectedFolderName.textContent = '未選択';
-      importBtn.disabled = true;
-      return;
-    }
-    // webkitRelativePath = "フォルダ名/ファイル名" → フォルダ名を取得
-    const folderName = files[0].webkitRelativePath.split('/')[0];
-    selectedFolderName.textContent = `${folderName}（${files.length} ファイル）`;
+  folderSelectBtn.addEventListener('click', async () => {
+    const result = await window.api.invoke('dialog:openDirectory', {});
+    if (result.canceled || !result.filePaths.length) return;
+    selectedFolderPath = result.filePaths[0];
+    selectedFolderName.textContent = selectedFolderPath.split(/[\\/]/).pop();
     importBtn.disabled = false;
   });
 
   importBtn.addEventListener('click', async () => {
-    const files = Array.from(folderPicker.files).filter(f => f.name.toUpperCase().endsWith('.CSV'));
-    if (files.length === 0) return;
+    if (!selectedFolderPath) return;
 
     importBtn.disabled = true;
     importBtn.textContent = '取込中...';
@@ -2452,52 +2546,38 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     progressWrap.classList.remove('hidden');
     resultBox.classList.add('hidden');
     progressBar.style.width = '0%';
-    progressText.textContent = `0 / ${files.length} ファイルをアップロード中...`;
+    progressText.textContent = '準備中...';
 
-    const formData = new FormData();
-    files.forEach(f => formData.append('files', f));
-    formData.append('format', document.getElementById('formatSelect').value);
+    // IPC push イベントで進捗を受け取る
+    const unsubscribe = window.api.on('admin:import:progress', (msg) => {
+      if (msg.type === 'progress') {
+        const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
+        progressBar.style.width = pct + '%';
+        progressText.textContent = `${msg.done} / ${msg.total} ファイル処理中${msg.symbol ? ` (${msg.symbol})` : ''}`;
+      } else if (msg.type === 'done') {
+        progressBar.style.width = '100%';
+        progressText.textContent = '完了';
+        resultBox.className = 'import-result success';
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = `取込完了：${msg.imported} 銘柄 / ${msg.totalRows?.toLocaleString() ?? 0} 行` +
+          (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
+        loadAdminStats();
+      } else if (msg.type === 'error') {
+        resultBox.className = 'import-result error';
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = msg.message;
+      }
+    });
 
     try {
-      const response = await fetch('/api/admin/import', { method: 'POST', body: formData });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const msg = JSON.parse(line.slice(6));
-          if (msg.type === 'progress') {
-            const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
-            progressBar.style.width = pct + '%';
-            progressText.textContent = `${msg.done} / ${msg.total} ファイル処理中${msg.symbol ? ` (${msg.symbol})` : ''}`;
-          } else if (msg.type === 'done') {
-            progressBar.style.width = '100%';
-            progressText.textContent = '完了';
-            resultBox.className = 'import-result success';
-            resultBox.classList.remove('hidden');
-            resultBox.textContent = `取込完了：${msg.imported} 銘柄 / ${msg.totalRows.toLocaleString()} 行` +
-              (msg.errors.length ? ` (エラー ${msg.errors.length} 件)` : '');
-            loadAdminStats();
-          } else if (msg.type === 'error') {
-            resultBox.className = 'import-result error';
-            resultBox.classList.remove('hidden');
-            resultBox.textContent = msg.message;
-          }
-        }
-      }
+      const formatId = document.getElementById('formatSelect').value;
+      await window.api.invoke('admin:import', { folderPath: selectedFolderPath, formatId });
     } catch (err) {
       resultBox.className = 'import-result error';
       resultBox.classList.remove('hidden');
       resultBox.textContent = 'エラー: ' + err.message;
     } finally {
+      unsubscribe();
       importBtn.disabled = false;
       importBtn.textContent = '取込開始';
     }
@@ -2505,15 +2585,14 @@ document.querySelectorAll('.view-tab').forEach(tab => {
 
   async function deleteSymbol(symbol) {
     if (!confirm(`${symbol} のデータを削除しますか？`)) return;
-    await fetch(`/api/admin/symbol/${symbol}`, { method: 'DELETE' });
+    await window.api.invoke('admin:delete-symbol', { symbol });
     loadAdminStats();
   }
 
   // --- J-Quants ---
   (async function loadJqStatus() {
     try {
-      const r = await fetch('/api/admin/jquants/status');
-      const s = await r.json();
+      const s = await window.api.invoke('admin:jquants:status');
       const bar = document.getElementById('jqStatusBar');
       bar.classList.remove('hidden');
       if (s.configured) {
@@ -2534,22 +2613,12 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     const btn = document.getElementById('jqSaveKeyBtn');
     btn.disabled = true; btn.textContent = 'テスト中...';
     try {
-      const r = await fetch('/api/admin/jquants/credentials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey }),
-      });
-      const data = await r.json();
+      const data = await window.api.invoke('admin:jquants:credentials', { apiKey });
       const bar = document.getElementById('jqStatusBar');
       bar.classList.remove('hidden');
-      if (r.ok) {
-        bar.className = 'import-result success';
-        bar.textContent = `接続成功：APIキーを保存しました（${data.status?.maskedKey ?? ''}）`;
-        document.getElementById('jqApiKeyInput').value = '';
-      } else {
-        bar.className = 'import-result error';
-        bar.textContent = data.error || '保存に失敗しました';
-      }
+      bar.className = 'import-result success';
+      bar.textContent = `接続成功：APIキーを保存しました（${data.status?.maskedKey ?? ''}）`;
+      document.getElementById('jqApiKeyInput').value = '';
     } catch (err) {
       const bar = document.getElementById('jqStatusBar');
       bar.classList.remove('hidden');
@@ -2572,7 +2641,8 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     return `残り約${h}時間${min > 0 ? min + '分' : ''}`;
   }
 
-  function startJqAutoDownload(endpoint, body) {
+  // channel: 'admin:jquants:update' | 'admin:jquants:fill'
+  function startJqAutoDownload(channel, body) {
     const updateBtn   = document.getElementById('jqUpdateBtn');
     const fillBtn     = document.getElementById('jqFillBtn');
     const stopBtn     = document.getElementById('jqStopBtn');
@@ -2588,50 +2658,39 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     progressBar.style.width = '0%';
     progressText.textContent = '準備中...';
 
-    let abortController = new AbortController();
-    stopBtn.onclick = () => abortController.abort();
+    stopBtn.onclick = () => window.api.invoke('admin:jquants:stop');
 
     const autoStartTime = Date.now();
-    fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), signal: abortController.signal })
-      .then(async response => {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n'); buffer = lines.pop();
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const msg = JSON.parse(line.slice(6));
-            if (msg.type === 'progress') {
-              const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
-              progressBar.style.width = pct + '%';
-              let etaStr = '';
-              if (msg.done > 0 && msg.total > 0) {
-                const elapsed = Date.now() - autoStartTime;
-                const remaining = (msg.total - msg.done) * (elapsed / msg.done);
-                etaStr = ' — ' + formatEta(remaining);
-              }
-              progressText.textContent = `${msg.done} / ${msg.total} 日付取得中${msg.symbol ? ` (${msg.symbol})` : ''}${etaStr}`;
-            } else if (msg.type === 'done') {
-              progressBar.style.width = '100%';
-              progressText.textContent = '完了';
-              resultBox.className = 'import-result success';
-              resultBox.classList.remove('hidden');
-              resultBox.textContent = `完了：${msg.totalInserted?.toLocaleString() ?? 0} 行追加` +
-                (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
-              loadAdminStats();
-            } else if (msg.type === 'error') {
-              resultBox.className = 'import-result error';
-              resultBox.classList.remove('hidden');
-              resultBox.textContent = msg.message;
-            }
-          }
+    const unsubscribe = window.api.on('admin:jquants:progress', (msg) => {
+      if (msg.type === 'progress') {
+        const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
+        progressBar.style.width = pct + '%';
+        let etaStr = '';
+        if (msg.done > 0 && msg.total > 0) {
+          const elapsed = Date.now() - autoStartTime;
+          const remaining = (msg.total - msg.done) * (elapsed / msg.done);
+          etaStr = ' — ' + formatEta(remaining);
         }
-      }).catch(() => {})
+        progressText.textContent = `${msg.done} / ${msg.total} 日付取得中${msg.symbol ? ` (${msg.symbol})` : ''}${etaStr}`;
+      } else if (msg.type === 'done') {
+        progressBar.style.width = '100%';
+        progressText.textContent = '完了';
+        resultBox.className = 'import-result success';
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = `完了：${msg.totalInserted?.toLocaleString() ?? 0} 行追加` +
+          (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
+        loadAdminStats();
+      } else if (msg.type === 'error') {
+        resultBox.className = 'import-result error';
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = msg.message;
+      }
+    });
+
+    window.api.invoke(channel, body || {})
+      .catch(() => {})
       .finally(() => {
+        unsubscribe();
         updateBtn.disabled = false; fillBtn.disabled = false;
         stopBtn.classList.add('hidden');
       });
@@ -2657,53 +2716,40 @@ document.querySelectorAll('.view-tab').forEach(tab => {
     progressText.textContent = '準備中...';
 
     const dlStartTime = Date.now();
-    try {
-      const response = await fetch('/api/admin/jquants/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols, period1, period2 }),
-      });
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n'); buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const msg = JSON.parse(line.slice(6));
-          if (msg.type === 'progress') {
-            const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
-            progressBar.style.width = pct + '%';
-            let etaStr = '';
-            if (msg.done > 0 && msg.total > 0) {
-              const elapsed = Date.now() - dlStartTime;
-              const remaining = (msg.total - msg.done) * (elapsed / msg.done);
-              etaStr = ' — ' + formatEta(remaining);
-            }
-            progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}${etaStr}`;
-          } else if (msg.type === 'done') {
-            progressBar.style.width = '100%';
-            progressText.textContent = '完了';
-            resultBox.className = 'import-result success';
-            resultBox.classList.remove('hidden');
-            resultBox.textContent = `取得完了：${msg.total} 銘柄 / ${msg.totalInserted?.toLocaleString() ?? 0} 行追加` +
-              (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
-            loadAdminStats();
-          } else if (msg.type === 'error') {
-            resultBox.className = 'import-result error';
-            resultBox.classList.remove('hidden');
-            resultBox.textContent = msg.message;
-          }
+    const unsubscribe = window.api.on('admin:jquants:progress', (msg) => {
+      if (msg.type === 'progress') {
+        const pct = msg.total ? Math.round(msg.done / msg.total * 100) : 0;
+        progressBar.style.width = pct + '%';
+        let etaStr = '';
+        if (msg.done > 0 && msg.total > 0) {
+          const elapsed = Date.now() - dlStartTime;
+          const remaining = (msg.total - msg.done) * (elapsed / msg.done);
+          etaStr = ' — ' + formatEta(remaining);
         }
+        progressText.textContent = `${msg.done} / ${msg.total} 銘柄取得中${msg.symbol ? ` (${msg.symbol})` : ''}${etaStr}`;
+      } else if (msg.type === 'done') {
+        progressBar.style.width = '100%';
+        progressText.textContent = '完了';
+        resultBox.className = 'import-result success';
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = `取得完了：${msg.total ?? symbols.length} 銘柄 / ${msg.totalInserted?.toLocaleString() ?? 0} 行追加` +
+          (msg.errors?.length ? ` (エラー ${msg.errors.length} 件)` : '');
+        loadAdminStats();
+      } else if (msg.type === 'error') {
+        resultBox.className = 'import-result error';
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = msg.message;
       }
+    });
+
+    try {
+      await window.api.invoke('admin:jquants:download', { symbols, period1, period2 });
     } catch (err) {
       resultBox.className = 'import-result error';
       resultBox.classList.remove('hidden');
       resultBox.textContent = 'エラー: ' + err.message;
     } finally {
+      unsubscribe();
       btn.disabled = false; btn.textContent = '取得開始';
     }
   });
@@ -2756,16 +2802,21 @@ document.querySelectorAll('.view-tab').forEach(tab => {
       });
     });
 
+    document.getElementById('jqGapFillBtn').addEventListener('click', () => {
+      if (!confirm('DBにある全銘柄の欠損期間（最終日〜今日）をJ-Quantsで補完します。銘柄数が多い場合は時間がかかります。続行しますか？')) return;
+      startJqAutoDownload('admin:jquants:gap-fill', {});
+    });
+
     document.getElementById('jqUpdateBtn').addEventListener('click', () => {
       const period2 = document.getElementById('jqAutoTo').value || null;
-      startJqAutoDownload('/api/admin/jquants/update', { period2, plan: selectedPlan });
+      startJqAutoDownload('admin:jquants:update', { period2, plan: selectedPlan });
     });
     document.getElementById('jqFillBtn').addEventListener('click', () => {
       const period1 = document.getElementById('jqAutoFrom').value;
       const period2 = document.getElementById('jqAutoTo').value || null;
       if (!period1) { alert('取得開始日を指定してください'); return; }
       if (!confirm(`DBにない全銘柄を ${period1} 〜 ${period2 || '今日'} で取得します。時間がかかる場合があります。続行しますか？`)) return;
-      startJqAutoDownload('/api/admin/jquants/fill', { period1, period2, plan: selectedPlan });
+      startJqAutoDownload('admin:jquants:fill', { period1, period2, plan: selectedPlan });
     });
   })();
 
@@ -2975,7 +3026,8 @@ function renderSequenceAnalysis(pairs) {
     const lotChg  = (next.shares - curr.shares) / curr.shares * 100;
     const gap     = calcHoldDays(curr.exitDate, next.entryDate);
     const revenge = curr.realizedPnl < 0 && (lotChg > 30 || gap <= 1);
-    if (revenge) revengeCount++;
+    if (!revenge) continue;
+    revengeCount++;
     const pnlCls = curr.realizedPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
     const lotCls = lotChg > 30 ? 'pnl-neg' : '';
     rows += `<tr>
@@ -2983,12 +3035,15 @@ function renderSequenceAnalysis(pairs) {
       <td class="${pnlCls}">${curr.realizedPnl >= 0 ? '+' : ''}${fmt(curr.realizedPnl)}円</td>
       <td class="${lotCls}">${lotChg >= 0 ? '+' : ''}${lotChg.toFixed(0)}%</td>
       <td>${gap}日</td>
-      <td>${revenge ? '<span style="color:var(--down)">⚠️ リベンジ疑い</span>' : '<span style="color:var(--text2)">-</span>'}</td>
+      <td><span style="color:var(--down)">⚠️ リベンジ疑い</span></td>
     </tr>`;
   }
+  if (revengeCount === 0) {
+    el.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:4px 0">リベンジトレードの疑いはありません。</div>';
+    return;
+  }
   let html = `<table class="trade-table"><thead><tr><th>決済日</th><th>結果</th><th>次のロット変化</th><th>次エントリーまで</th><th>判定</th></tr></thead><tbody>${rows}</tbody></table>`;
-  if (revengeCount > 0)
-    html += `<div class="ana-insight" style="margin-top:8px">⚠️ ${revengeCount}件のリベンジトレードの疑いがあります。負け後のロット増加は感情的な判断かもしれません。</div>`;
+  html += `<div class="ana-insight" style="margin-top:8px">⚠️ ${revengeCount}件のリベンジトレードの疑いがあります。負け後のロット増加は感情的な判断かもしれません。</div>`;
   el.innerHTML = html;
 }
 
@@ -3197,7 +3252,7 @@ function renderAIAdvice(pairs, lossPairs, winPairs, prayerScore, panicScore, con
   if (winPairs.length >= 2 && mfeUsage !== null && mfeUsage < 0.5 && avgWinMFE > 2)
     goalCandidates.push('利益は含み益の70%以上取る');
   if (winPairs.length >= 2 && lossPairs.length >= 2 && avgLossHold > avgWinHold * 1.5 && avgWinHold > 0)
-    goalCandidates.push('勝ちを負けより長く持つ');
+    goalCandidates.push('利益が出ていればホールド、損切りは早く。');
   if (consistScore != null && consistScore < 30 && lossPairs.length >= 3)
     goalCandidates.push('損切りは必ず-5%で統一');
   if (tradingDays !== null && pairs.length >= 8 && tradingDays / pairs.length < 3)
@@ -3273,12 +3328,518 @@ function renderRoundComparison(pairs) {
   document.getElementById('roundCompareContent').innerHTML = html;
 }
 
+// ===== 刺激→反応分析（3Rモード専用） =====
+
+const EVENT_META = {
+  single_drop:    { label: '単日急落',         icon: '🔻', group: '下落系', respType: 'drop',    desc: '1日で前日終値から大きく下落（-3%以上）したローソク足。急な売り圧力が発生した場面。' },
+  gap_down:       { label: 'ギャップダウン',    icon: '↙️', group: '下落系', respType: 'drop',    desc: '前日終値より大きく窓を開けて安く寄り付いた日。夜間の悪材料や売り注文の集中が原因。' },
+  consec_drop:    { label: '連続下落(3日+)',    icon: '📉', group: '下落系', respType: 'drop',    desc: '3日以上続けて下落した局面。売りトレンドが続いており、保有者は含み損が膨らみやすい。' },
+  new_low:        { label: '直近安値更新',      icon: '🔽', group: '下落系', respType: 'drop',    desc: '過去20日間の最安値を更新した日。下値支持が崩れたサインで、さらなる下落を示唆することが多い。' },
+  lower_wick:     { label: '長い下ヒゲ',        icon: '⚡', group: '下落系', respType: 'bottom',  desc: '安値まで売られた後、買い戻されて終値が高い位置で引けたローソク足。下値での買い需要が強いことを示す。' },
+  single_rise:    { label: '単日急騰',          icon: '🔺', group: '上昇系', respType: 'rise',    desc: '1日で前日終値から大きく上昇（+3%以上）したローソク足。強い買い圧力が発生した場面。' },
+  gap_up:         { label: 'ギャップアップ',    icon: '↗️', group: '上昇系', respType: 'rise',    desc: '前日終値より大きく窓を開けて高く寄り付いた日。好材料や買い注文の集中が原因。' },
+  consec_rise:    { label: '連続上昇(3日+)',    icon: '📈', group: '上昇系', respType: 'rise',    desc: '3日以上続けて上昇した局面。買いトレンドが続いており、空売り保有者は含み損が膨らみやすい。' },
+  new_high:       { label: '直近高値更新',      icon: '🔼', group: '上昇系', respType: 'rise',    desc: '過去20日間の最高値を更新した日。上値抵抗が突破されたサインで、さらなる上昇を示唆することが多い。' },
+  upper_wick:     { label: '長い上ヒゲ',        icon: '⚡', group: '上昇系', respType: 'top',     desc: '高値まで買われた後、売り戻されて終値が低い位置で引けたローソク足。上値での売り圧力が強いことを示す。' },
+  trend_rev_down: { label: 'トレンド転換(↓)',  icon: '🔄', group: '転換系', respType: 'drop',    desc: '直前まで上昇していたが、その後下落に転じた転換点。高値掴みのリスクが高まっていた局面。' },
+  trend_rev_up:   { label: 'トレンド転換(↑)',  icon: '🔄', group: '転換系', respType: 'rise',    desc: '直前まで下落していたが、その後上昇に転じた転換点。底値圏での買い場になりやすい局面。' },
+  fake_breakout:  { label: '偽ブレイクアウト',  icon: '🪤', group: '転換系', respType: 'neutral', desc: '高値や安値を一時的に超えたように見えたが、すぐに元の水準に戻った動き。トラップにかかりやすい場面。' },
+  whipsaw:        { label: '往復ビンタ',        icon: '🌊', group: '転換系', respType: 'neutral', desc: '大きく上下に振れた後に元の価格帯に戻ったローソク足。両方向のストップを狩る動きで、判断が難しい場面。' },
+  range:          { label: 'もみ合い継続',      icon: '↔️', group: '転換系', respType: 'neutral', desc: '一定の価格帯内で上下を繰り返し、方向感のない状態。エントリーすると損切りにかかりやすい局面。' },
+};
+
+/** チャートイベントを全足から検出 */
+function detectChartEvents(allDates, startIdx) {
+  const bars = allDates.slice(startIdx);
+  const N = bars.length;
+  if (N < 5) return [];
+
+  const events = [];
+  const lastByType = {};
+
+  const add = (type, barIdx, value = null) => {
+    if ((lastByType[type] ?? -99) >= barIdx - 3) return; // 3本以内の重複を抑制
+    if (events.filter(e => e.type === type).length >= 4) return; // 同種は最大4件
+    const meta = EVENT_META[type];
+    if (!meta) return;
+    const valStr = value != null ? `(${value >= 0 ? '+' : ''}${value.toFixed(1)}%)` : '';
+    events.push({ type, barIdx, value, icon: meta.icon, group: meta.group,
+                  respType: meta.respType, label: meta.label + valStr });
+    lastByType[type] = barIdx;
+  };
+
+  let downStreak = 0, upStreak = 0;
+
+  for (let i = 1; i < N; i++) {
+    const cur  = bars[i];
+    const prev = bars[i - 1];
+    if (!cur?.close || !prev?.close) continue;
+
+    const dayChg = (cur.close - prev.close) / prev.close * 100;
+    const gapChg = cur.open ? (cur.open - prev.close) / prev.close * 100 : 0;
+
+    // 単日急落 / 急騰
+    if (dayChg <= -5) add('single_drop', i, dayChg);
+    if (dayChg >=  5) add('single_rise', i, dayChg);
+
+    // ギャップ
+    if (cur.open && gapChg <= -3) add('gap_down', i, gapChg);
+    if (cur.open && gapChg >=  3) add('gap_up',   i, gapChg);
+
+    // 連続下落 / 上昇（3日目に記録）
+    if (dayChg < 0) { downStreak++; upStreak = 0; }
+    else if (dayChg > 0) { upStreak++; downStreak = 0; }
+    else { downStreak = 0; upStreak = 0; }
+    if (downStreak === 3) add('consec_drop', i - 2);
+    if (upStreak   === 3) add('consec_rise', i - 2);
+
+    // 直近20日 高値 / 安値更新
+    if (i >= 10) {
+      const w  = bars.slice(Math.max(0, i - 20), i);
+      const mH = Math.max(...w.map(b => b.high || b.close));
+      const mL = Math.min(...w.map(b => b.low  || b.close));
+      if ((cur.high || cur.close) > mH) add('new_high', i);
+      if ((cur.low  || cur.close) < mL) add('new_low',  i);
+    }
+
+    // ヒゲ
+    if (cur.open && cur.high && cur.low) {
+      const bH    = Math.max(cur.close, cur.open);
+      const bL    = Math.min(cur.close, cur.open);
+      const body  = (bH - bL) || cur.open * 0.002;
+      const upper = cur.high - bH;
+      const lower = bL - cur.low;
+      if (upper > body * 2 && upper / cur.open > 0.015) add('upper_wick', i, upper / cur.open * 100);
+      if (lower > body * 2 && lower / cur.open > 0.015) add('lower_wick', i, lower / cur.open * 100);
+    }
+
+    // トレンド転換（5日MA）
+    if (i >= 7) {
+      const ma = j => {
+        const sl = bars.slice(Math.max(0, j - 4), j + 1);
+        return sl.reduce((s, b) => s + (b.close || 0), 0) / sl.length;
+      };
+      const m0 = ma(i), m1 = ma(i - 1), m3 = ma(i - 3), m4 = ma(i - 4);
+      if (m0 < m1 && m3 > m4) add('trend_rev_down', i);
+      if (m0 > m1 && m3 < m4) add('trend_rev_up',   i);
+    }
+
+    // 往復ビンタ（3日以内に±5%超）
+    if (i >= 3) {
+      const w3 = bars.slice(i - 3, i + 1);
+      const mH = Math.max(...w3.map(b => b.high || b.close));
+      const mL = Math.min(...w3.map(b => b.low  || b.close));
+      if (mL > 0 && (mH - mL) / mL * 100 >= 10) add('whipsaw', i - 1);
+    }
+
+    // 偽ブレイクアウト（直近10日高安値更新→3日以内に反転）
+    if (i >= 11 && i + 3 < N) {
+      const w10 = bars.slice(i - 10, i);
+      const rH  = Math.max(...w10.map(b => b.high || b.close));
+      const rL  = Math.min(...w10.map(b => b.low  || b.close));
+      const fut = bars.slice(i + 1, Math.min(N, i + 4));
+      if ((cur.high || cur.close) > rH && fut.some(b => b.close < rH)) add('fake_breakout', i);
+      if ((cur.low  || cur.close) < rL && fut.some(b => b.close > rL)) add('fake_breakout', i);
+    }
+
+    // もみ合い（10日間±3%以内、5本おきにチェック）
+    if (i >= 10 && i % 5 === 0) {
+      const w10 = bars.slice(i - 10, i + 1);
+      const mH  = Math.max(...w10.map(b => b.high || b.close));
+      const mL  = Math.min(...w10.map(b => b.low  || b.close));
+      if (mL > 0 && (mH - mL) / mL * 100 <= 6) add('range', i - 5);
+    }
+  }
+
+  return events.sort((a, b) => a.barIdx - b.barIdx);
+}
+
+/** 1イベント × 1ラウンドの投資家反応を分類 */
+function classifyEventResponse(event, roundActs, allDates, startIdx) {
+  const globalIdx = startIdx + event.barIdx;
+  const eventDate = allDates[globalIdx]?.date;
+  if (!eventDate) return '—';
+
+  // イベント時点でのポジション確定（イベント日以前の操作）
+  let lPos = 0, sPos = 0;
+  for (const t of roundActs) {
+    if (t.date > eventDate) break;
+    if (t.type === 'buy')   lPos = Math.min(lPos + 1, 1);
+    if (t.type === 'sell')  lPos = Math.max(lPos - 1, 0);
+    if (t.type === 'short') sPos = Math.min(sPos + 1, 1);
+    if (t.type === 'cover') sPos = Math.max(sPos - 1, 0);
+  }
+  const holding = lPos > 0 || sPos > 0;
+  const holdingLong  = lPos > 0;
+  const holdingShort = sPos > 0;
+
+  // イベント日〜+2本以内の反応
+  const endDate = allDates[Math.min(allDates.length - 1, globalIdx + 2)]?.date || eventDate;
+  const near    = roundActs.filter(t => t.date >= eventDate && t.date <= endDate);
+  const exited  = near.some(t => t.type === 'sell'  || t.type === 'cover');
+  const entered = near.some(t => t.type === 'buy'   || t.type === 'short');
+
+  switch (event.respType) {
+    case 'drop':
+      if (!holding) return entered ? '逆張り買い' : '未保有';
+      if (holdingShort) return exited ? '利確(空売)' : '保有継続';  // 空売りに有利
+      return exited ? 'パニック売り' : '耐えた';
+    case 'rise':
+      if (!holding) return entered ? '飛び乗り' : '様子見';
+      if (holdingShort) return exited ? 'ロスカット(空)' : '損失方向で保有';  // 空売りに不利
+      return exited ? '利確' : '保有継続';
+    case 'bottom':
+      if (!holding) return entered ? '拾い買い' : '様子見';
+      if (holdingShort) return exited ? 'ロスカット(空)' : '保有継続';
+      return exited ? '売り' : '保有継続';
+    case 'top':
+      if (!holding) return '未保有';
+      if (holdingShort) return exited ? '利確(空売)' : '保有継続';
+      return exited ? '天井利確' : '保有継続';
+    default:
+      if (!holding) return entered ? '新規参入' : '未保有';
+      return exited ? '途中撤退' : '保有継続';
+  }
+}
+
+/** 反応ラベルのCSSクラス */
+function respCls(r) {
+  if (['パニック売り', '飛び乗り', '途中撤退'].includes(r)) return 'pnl-neg';
+  if (['耐えた', '様子見', '保有継続', '拾い買い', '利確', '天井利確'].includes(r)) return 'pnl-pos';
+  return '';
+}
+
+/**
+ * ポジション保有中に発生した試練イベントを検出（ラウンド別）
+ * @returns {Array} roundIdx => { hasData, events: [{type, value, label}] }
+ */
+function analyzePositionEvents(roundActs, allDates) {
+  return roundActs.map(acts => {
+    if (!acts.length) return { hasData: false, events: [] };
+
+    const pairs = [];
+    const longStack = [], shortStack = [];
+    const sorted = [...acts].sort((a, b) => a.date < b.date ? -1 : 1);
+    for (const t of sorted) {
+      if      (t.type === 'buy')                       longStack.push(t);
+      else if (t.type === 'sell'  && longStack.length)  pairs.push({ entry: longStack.pop(),  exit: t, kind: 'long'  });
+      else if (t.type === 'short')                      shortStack.push(t);
+      else if (t.type === 'cover' && shortStack.length) pairs.push({ entry: shortStack.pop(), exit: t, kind: 'short' });
+    }
+    for (const e of longStack)  pairs.push({ entry: e, exit: null, kind: 'long'  });
+    for (const e of shortStack) pairs.push({ entry: e, exit: null, kind: 'short' });
+
+    const posEvents = [];
+
+    for (const { entry, exit, kind } of pairs) {
+      const entryGIdx = allDates.findIndex(d => d.date === entry.date);
+      if (entryGIdx < 0) continue;
+      const exitGIdx = exit ? allDates.findIndex(d => d.date === exit.date) : allDates.length - 1;
+      const bars = allDates.slice(entryGIdx, exitGIdx + 1);
+      if (bars.length < 2) continue;
+      const ep = entry.price;
+      if (!ep) continue;
+      const isLong = kind === 'long';
+
+      // エントリー直後逆行（2日以内に-3%以上の逆行）
+      const earlyBars = bars.slice(1, Math.min(3, bars.length));
+      if (earlyBars.length) {
+        const worst = isLong
+          ? Math.min(...earlyBars.map(b => (b.low  || b.close) / ep - 1)) * 100
+          : Math.min(...earlyBars.map(b => 1 - (b.high || b.close) / ep)) * 100;
+        if (worst <= -3)
+          posEvents.push({ type: 'entry_reversal', value: +worst.toFixed(1),
+                           label: `エントリー直後逆行(${worst.toFixed(1)}%)` });
+      }
+
+      // MFE計算
+      const mfe = isLong
+        ? Math.max(...bars.map(b => (b.high || b.close) / ep - 1)) * 100
+        : Math.max(...bars.map(b => 1 - (b.low  || b.close) / ep)) * 100;
+
+      // 含み益縮小（MFE≥5% かつ実現益がMFEの50%未満）
+      if (exit && mfe >= 5) {
+        const realized = isLong
+          ? (exit.price / ep - 1) * 100
+          : (1 - exit.price / ep) * 100;
+        if (realized < mfe * 0.5)
+          posEvents.push({ type: 'profit_giveback',
+                           value: +(realized / mfe * 100).toFixed(0),
+                           label: `含み益縮小(最大${mfe.toFixed(1)}%→${realized.toFixed(1)}%確定)` });
+      }
+
+      // 長期塩漬け（含み損のまま10日以上）
+      const lossDays = bars.slice(1).filter(b => {
+        const pnl = isLong ? b.close / ep - 1 : 1 - b.close / ep;
+        return pnl < 0;
+      }).length;
+      if (lossDays >= 10)
+        posEvents.push({ type: 'holding_loss', value: lossDays,
+                         label: `長期塩漬け(含み損${lossDays}日)` });
+    }
+
+    return { hasData: true, events: posEvents };
+  });
+}
+
+/**
+ * エントリー時のチャート文脈を分析（直前5本以内のイベント）
+ * @returns {Array} roundIdx => { hasData, barIdx, kind, precedingEvents }
+ */
+function analyzeEntryContext(roundActs, allDates, startIdx, events) {
+  return roundActs.map(acts => {
+    if (!acts.length) return { hasData: false, barIdx: null };
+    const sorted = [...acts].sort((a, b) => a.date < b.date ? -1 : 1);
+    const firstEntry = sorted.find(t => t.type === 'buy' || t.type === 'short');
+    if (!firstEntry) return { hasData: true, barIdx: null, kind: null, precedingEvents: [] };
+    const gIdx = allDates.findIndex(d => d.date === firstEntry.date);
+    if (gIdx < 0) return { hasData: true, barIdx: null, kind: null, precedingEvents: [] };
+    const entryBarIdx = gIdx - startIdx;
+    const preceding = events.filter(e => e.barIdx >= entryBarIdx - 5 && e.barIdx < entryBarIdx);
+    return { hasData: true, barIdx: entryBarIdx, kind: firstEntry.type, precedingEvents: preceding };
+  });
+}
+
+/** 3R刺激→反応分析を描画 */
+function renderChartBehaviorAnalysis() {
+  const sec = document.getElementById('chartBehaviorSection');
+  if (!roundMode || !currentSessionId || roundSessionStartIdx == null || !guest.all_dates?.length) {
+    sec.style.display = 'none';
+    return;
+  }
+
+  const allDates = guest.all_dates;
+  const startIdx = roundSessionStartIdx;
+  const events   = detectChartEvents(allDates, startIdx);
+  if (!events.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+
+  // ラウンド別の全操作（日付順ソート済み）
+  const roundActs = [1, 2, 3].map(r =>
+    guest.trades
+      .filter(t => t.round === r && t.sessionId === currentSessionId)
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+  );
+  const playedRounds = roundActs.filter(a => a.length > 0).length;
+  const noTradeRounds = roundActs.map(a => a.length === 0); // トレードなしフラグ
+
+  // チャートプロファイルタグ
+  const gcnt = {};
+  for (const e of events) gcnt[e.group] = (gcnt[e.group] || 0) + 1;
+  const tags = [];
+  if ((gcnt['下落系'] || 0) >= 3)                       tags.push('急落多め');
+  if ((gcnt['上昇系'] || 0) >= 3)                       tags.push('急騰多め');
+  if ((gcnt['転換系'] || 0) >= 2)                       tags.push('荒れた展開');
+  if (events.some(e => e.type === 'fake_breakout'))     tags.push('偽ブレイクあり');
+  if (events.some(e => e.type === 'whipsaw'))           tags.push('往復ビンタあり');
+  if (events.some(e => e.type === 'range'))             tags.push('もみ合いあり');
+  if (!tags.length)                                     tags.push('標準的な値動き');
+
+  document.getElementById('chartProfileContent').innerHTML =
+    `<div class="chart-profile-row">このチャートの特徴：`
+    + tags.map(t => `<span class="chart-profile-tag">${t}</span>`).join('')
+    + `</div>`;
+
+  // ── ① エントリータイミング比較 ──
+  const entryCtx = analyzeEntryContext(roundActs, allDates, startIdx, events);
+  let entryHtml = `<div class="analysis-section-title" style="margin-top:10px">📍 エントリータイミング比較</div>`;
+
+  const rHeaders = [1,2,3].map(r => {
+    if (noTradeRounds[r-1]) return `<th style="color:var(--text2)">R${r}<br><small>トレードなし</small></th>`;
+    return `<th>R${r}</th>`;
+  }).join('');
+
+  // バー番号行
+  const barRow = entryCtx.map((ctx, i) => {
+    if (noTradeRounds[i]) return `<td style="text-align:center;color:var(--text2)">—</td>`;
+    if (!ctx.hasData || ctx.barIdx == null) return `<td style="text-align:center;color:var(--text2)">—</td>`;
+    const kindLabel = ctx.kind === 'buy' ? '買' : '空売';
+    return `<td style="text-align:center;font-size:11px">${ctx.barIdx}本目<br><small style="color:var(--text2)">${kindLabel}</small></td>`;
+  }).join('');
+
+  // バー番号の一致判定
+  const validBars = entryCtx.filter((c, i) => !noTradeRounds[i] && c.hasData && c.barIdx != null).map(c => c.barIdx);
+  const barAgree = validBars.length >= 2 && validBars.every(b => Math.abs(b - validBars[0]) <= 2);
+  const barBadge = validBars.length >= 2
+    ? (barAgree ? `<span class="badge-full">近似一致</span>` : `<span class="badge-partial">バラバラ</span>`)
+    : '';
+
+  // エントリー前の状況行
+  const ctxRow = entryCtx.map((ctx, i) => {
+    if (noTradeRounds[i]) return `<td style="text-align:center;color:var(--text2)">—</td>`;
+    if (!ctx.hasData || !ctx.precedingEvents?.length)
+      return `<td style="text-align:center;color:var(--text2);font-size:11px">特定イベントなし</td>`;
+    return `<td style="text-align:center;font-size:10px">${ctx.precedingEvents.map(e => e.icon + e.label).join('<br>')}</td>`;
+  }).join('');
+
+  // エントリー前イベントの一致判定
+  const ctxTypes = entryCtx.filter((c, i) => !noTradeRounds[i] && c.hasData).map(c =>
+    (c.precedingEvents || []).map(e => e.type).sort().join(',')
+  );
+  const ctxAgree = ctxTypes.length >= 2 && ctxTypes.every(t => t === ctxTypes[0]);
+  const ctxBadge = ctxTypes.length >= 2
+    ? (ctxAgree ? `<span class="badge-full">一致</span>` : `<span class="badge-partial">不一致</span>`)
+    : '';
+
+  entryHtml += `<div class="event-matrix-wrap"><table class="trade-table">
+    <thead><tr><th style="text-align:left">項目</th>${rHeaders}<th>一致</th></tr></thead>
+    <tbody>
+      <tr><td>エントリーバー番号</td>${barRow}<td style="text-align:center">${barBadge}</td></tr>
+      <tr><td>直前の状況(5本以内)</td>${ctxRow}<td style="text-align:center">${ctxBadge}</td></tr>
+    </tbody>
+  </table></div>`;
+  document.getElementById('eventResponseContent').innerHTML = entryHtml;
+
+  // ── ② 試練ポイントへの反応マトリクス ──
+  const rows = events.map(ev => ({
+    ev,
+    responses: roundActs.map((acts, i) =>
+      noTradeRounds[i] ? 'トレードなし' : classifyEventResponse(ev, acts, allDates, startIdx)
+    ),
+  })).filter(row => !row.responses.every(r => r === '未保有' || r === '—' || r === 'トレードなし'));
+
+  let matrixHtml = `<div class="analysis-section-title" style="margin-top:14px">⚡ 試練ポイントへの反応</div>`;
+  if (rows.length) {
+    const groups = [...new Set(rows.map(r => r.ev.group))];
+    let tbl = `<div class="event-matrix-wrap"><table class="trade-table">
+      <thead><tr>
+        <th style="text-align:left;min-width:150px">試練ポイント</th>
+        <th style="min-width:80px">R1</th><th style="min-width:80px">R2</th><th style="min-width:80px">R3</th>
+        <th>一致</th>
+      </tr></thead><tbody>`;
+
+    for (const grp of groups) {
+      tbl += `<tr><td colspan="5" class="event-group-header">${grp}</td></tr>`;
+      for (const { ev, responses } of rows.filter(r => r.ev.group === grp)) {
+        const active = responses.filter(r => r !== '未保有' && r !== '—' && r !== 'トレードなし');
+        let badge = '';
+        if (active.length >= 2) {
+          const mode  = active.reduce((a, b, _, arr) =>
+            arr.filter(v => v === a).length >= arr.filter(v => v === b).length ? a : b);
+          const agree = active.filter(r => r === mode).length;
+          badge = agree === active.length
+            ? `<span class="badge-full">${agree}/${active.length}</span>`
+            : `<span class="badge-partial">${agree}/${active.length}</span>`;
+        }
+        tbl += `<tr>
+          <td data-tooltip="${ev.desc ?? ''}">${ev.icon} ${ev.label}</td>
+          ${responses.map(r => {
+            const cls = r === 'トレードなし' ? '' : respCls(r);
+            const col = r === 'トレードなし' ? 'color:var(--text2)' : '';
+            return `<td class="${cls}" style="text-align:center;font-size:11px;white-space:nowrap;${col}">${r}</td>`;
+          }).join('')}
+          <td style="text-align:center">${badge}</td>
+        </tr>`;
+      }
+    }
+    tbl += '</tbody></table></div>';
+    matrixHtml += tbl;
+  } else {
+    matrixHtml += `<div style="color:var(--text2);font-size:12px;padding:8px 0">トレード後に表示されます。</div>`;
+  }
+
+  // ── ③ 保有状況系イベント ──
+  const posEventsPerRound = analyzePositionEvents(roundActs, allDates);
+  const POS_TYPES = [
+    { type: 'entry_reversal', label: 'エントリー直後逆行', icon: '😬', desc: 'エントリーから2日以内に-3%以上の逆行が発生した。入り口を間違えたか、タイミングが早すぎた可能性がある。' },
+    { type: 'profit_giveback', label: '含み益縮小',         icon: '😥', desc: '最大含み益の50%以上を失って決済した。利益を引っ張りすぎて吐き出してしまったパターン。' },
+    { type: 'holding_loss',    label: '長期塩漬け',          icon: '😰', desc: '10日以上にわたって損失状態のポジションを保有し続けた。損切りルールが機能していない可能性がある。' },
+  ];
+
+  let posHtml = `<div class="analysis-section-title" style="margin-top:14px">🩺 ポジション中の試練</div>`;
+  let hasPosData = posEventsPerRound.some(r => r.hasData);
+  if (hasPosData) {
+    let tbl = `<div class="event-matrix-wrap"><table class="trade-table">
+      <thead><tr><th style="text-align:left">試練</th>${rHeaders}<th>発生率</th></tr></thead><tbody>`;
+    for (const pt of POS_TYPES) {
+      const cells = posEventsPerRound.map((re, i) => {
+        if (noTradeRounds[i]) return `<td style="text-align:center;color:var(--text2)">—</td>`;
+        if (!re.hasData) return `<td style="text-align:center;color:var(--text2)">未プレイ</td>`;
+        const found = re.events.filter(e => e.type === pt.type);
+        if (!found.length) return `<td style="text-align:center;color:var(--text2);font-size:11px">なし</td>`;
+        return `<td style="text-align:center;font-size:10px;color:var(--down)">${found.map(e => e.label).join('<br>')}</td>`;
+      }).join('');
+      const occuredCount = posEventsPerRound.filter((re, i) => !noTradeRounds[i] && re.hasData && re.events.some(e => e.type === pt.type)).length;
+      const totalPlayed  = posEventsPerRound.filter((re, i) => !noTradeRounds[i] && re.hasData).length;
+      const rateBadge = totalPlayed >= 2
+        ? (occuredCount === totalPlayed
+            ? `<span class="badge-full">${occuredCount}/${totalPlayed}</span>`
+            : occuredCount >= 2
+              ? `<span class="badge-partial">${occuredCount}/${totalPlayed}</span>`
+              : `<span style="color:var(--text2);font-size:10px">${occuredCount}/${totalPlayed}</span>`)
+        : '';
+      tbl += `<tr><td data-tooltip="${pt.desc ?? ''}">${pt.icon} ${pt.label}</td>${cells}<td style="text-align:center">${rateBadge}</td></tr>`;
+    }
+    tbl += '</tbody></table></div>';
+    posHtml += tbl;
+  } else {
+    posHtml += `<div style="color:var(--text2);font-size:12px;padding:8px 0">トレード後に表示されます。</div>`;
+  }
+
+  document.getElementById('eventResponseContent').innerHTML += '';
+
+  // ── ④ クセ結論（価格イベント + ポジションイベント 統合） ──
+  const habits = [];
+
+  // 価格イベント由来のクセ
+  for (const { ev, responses } of rows) {
+    const active = responses.filter(r => r !== '未保有' && r !== '—' && r !== 'トレードなし');
+    if (active.length < 2) continue;
+    const rcnt = {};
+    for (const r of active) rcnt[r] = (rcnt[r] || 0) + 1;
+    const [[topR, topN]] = Object.entries(rcnt).sort((a, b) => b[1] - a[1]);
+    if (topN >= 2) habits.push({ icon: ev.icon, evLabel: ev.label, resp: topR, count: topN, total: active.length });
+  }
+
+  // ポジションイベント由来のクセ
+  for (const pt of POS_TYPES) {
+    const occured = posEventsPerRound.filter((re, i) => !noTradeRounds[i] && re.hasData && re.events.some(e => e.type === pt.type));
+    const played  = posEventsPerRound.filter((re, i) => !noTradeRounds[i] && re.hasData);
+    if (played.length >= 2 && occured.length >= 2) {
+      habits.push({ icon: pt.icon, evLabel: pt.label, resp: '発生', count: occured.length, total: played.length });
+    }
+  }
+
+  // エントリーバー番号のクセ
+  if (barAgree && validBars.length >= 2) {
+    const avg = Math.round(validBars.reduce((s, b) => s + b, 0) / validBars.length);
+    habits.push({ icon: '📍', evLabel: 'エントリータイミング', resp: `毎回${avg}本目付近`, count: validBars.length, total: playedRounds });
+  }
+  // エントリー前状況のクセ
+  if (ctxAgree && ctxTypes.length >= 2 && ctxTypes[0]) {
+    const label = entryCtx.find((c, i) => !noTradeRounds[i] && c.hasData && c.precedingEvents?.length)?.precedingEvents[0]?.label || '';
+    if (label) habits.push({ icon: '🎯', evLabel: 'エントリーの引き金', resp: label, count: ctxTypes.length, total: playedRounds });
+  }
+
+  let conclusionHtml = '';
+  if (habits.length) {
+    const lines = habits.map(h => {
+      const isAll = h.count === h.total;
+      const color = isAll ? '#f59e0b' : '#9ca3af';
+      const label = isAll ? '強いクセ' : '傾向あり';
+      return `<div class="habit-row">
+        <span class="habit-evlabel">${h.icon} ${h.evLabel}</span>
+        <span class="habit-arrow">→</span>
+        <span class="habit-resp ${respCls(h.resp)}">${h.resp}</span>
+        <span class="habit-badge" style="color:${color}">${h.count}/${h.total}回・${label}</span>
+      </div>`;
+    }).join('');
+    conclusionHtml = `<div class="analysis-section-title" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">🧬 抽出されたクセ</div>` + lines;
+  } else if (playedRounds >= 3) {
+    conclusionHtml = `<div class="ana-insight" style="margin-top:10px">一貫したクセは検出されませんでした。3ラウンドで判断が毎回異なります（それ自体も発見です）。</div>`;
+  } else {
+    conclusionHtml = `<div style="color:var(--text2);font-size:12px;padding:8px 0">3ラウンド完了後にクセが抽出されます（現在${playedRounds}ラウンド）。</div>`;
+  }
+  document.getElementById('habitConclusionContent').innerHTML = conclusionHtml;
+}
+
 /** 分析タブ全体レンダリング */
 function renderAnalysis() {
   const pairs = buildTradePairs();
   renderAnalysisStats(pairs);
   renderScoreCards(pairs);
   renderRoundComparison(pairs);
+  renderChartBehaviorAnalysis();
   renderHoldPnlScatter(pairs);
   renderMAEMFEChart(pairs);
   renderSequenceAnalysis(pairs);
